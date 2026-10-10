@@ -1,0 +1,45 @@
+# 1. Environment Variables & Secrets (CRITICAL)
+.env
+.env.*
+!.env.example
+
+# 2. Local State Buffer & Databases
+# Prevents committing the live SQLite database used for pending_adoptions
+*.db
+*.sqlite
+*.sqlite3
+
+# 3. Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 4. Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 5. Testing & Linting Caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# 6. Build Artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 7. OS & IDE Specific
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

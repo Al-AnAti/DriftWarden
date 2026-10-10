@@ -1,0 +1,20 @@
+# docker-compose.test.yml
+version: '3.8'
+name: infrastructure-test
+
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    labels:
+      - "sentinel.managed=true"
+      - "sentinel.repo=my-cs-project"
+  
+  cache:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    labels:
+      - "sentinel.managed=true"
+      - "sentinel.repo=my-cs-project"

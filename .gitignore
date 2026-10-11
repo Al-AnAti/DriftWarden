@@ -27,6 +27,7 @@ __pycache__/
 # 5. Testing & Linting Caches
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
 htmlcov/
 coverage.xml

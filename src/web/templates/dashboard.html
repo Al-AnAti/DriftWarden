@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - GitOps-Sentinel{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- عنوان الصفحة -->
+    <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-bold tracking-tight">System Dashboard & Containers</h1>
+        <button onclick="location.reload()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow">
+            🔄 Refresh Status
+        </button>
+    </div>
+
+    <!-- بطاقات الإحصائيات السريعة (تحديث بالبيانات الحية من قاعدة البيانات) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-sm">
+            <p class="text-sm font-medium text-gray-400">Tracked Orphans</p>
+            <p class="text-3xl font-bold text-indigo-400 mt-2">{{ orphans_count }}</p>
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-sm">
+            <p class="text-sm font-medium text-gray-400">Active Drifts</p>
+            <p class="text-3xl font-bold text-yellow-400 mt-2">{{ drifts_count }}</p>
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-sm">
+            <p class="text-sm font-medium text-gray-400">System Mode</p>
+            <p class="text-xl font-semibold text-green-400 mt-2">Autonomous</p>
+        </div>
+    </div>
+
+    <!-- جدول عرض الحاويات أو السجلات -->
+    <div class="bg-gray-800 border border-gray-700 rounded-xl shadow overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200">Runtime Live State</h2>
+        </div>
+        <div class="p-6 text-center text-gray-400">
+            <p>No active drifts or orphans detected yet. System is synchronized with Git baseline.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

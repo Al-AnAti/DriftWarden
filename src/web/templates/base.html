@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}GitOps-Sentinel Control Plane{% endblock %}</title>
+    <!-- تضمين Tailwind CSS لتصميم سريع واحترافي -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col">
+
+    <!-- شريط التنقل العلوي -->
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center shadow-md">
+        <div class="flex items-center space-x-3">
+            <span class="text-xl font-bold tracking-wider text-indigo-400">🛡️ GitOps-Sentinel</span>
+            <span class="text-xs bg-indigo-900 text-indigo-200 px-2.5 py-1 rounded-full font-medium">Control Plane</span>
+        </div>
+        <div class="text-sm text-gray-400">
+            Status: <span class="text-green-400 font-semibold">● Online</span>
+        </div>
+    </nav>
+
+    <!-- المحتوى الرئيسي للصفحات -->
+    <main class="flex-grow container mx-auto px-6 py-8">
+        {% block content %}
+        <!-- يتم حقن محتوى كل صفحة هنا -->
+        {% endblock %}
+    </main>
+
+    <!-- التذييل (Footer) -->
+    <footer class="bg-gray-800 border-t border-gray-700 text-center py-4 text-xs text-gray-500">
+        GitOps-Sentinel Capstone Project &copy; 2026 | Automated State-Reconciliation Engine
+    </footer>
+
+</body>
+</html>

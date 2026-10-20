@@ -1,77 +1,142 @@
 # DriftWarden
 
-DriftWarden is a lightweight, local GitOps guardrail and drift-remediation daemon for standalone Docker hosts. It ensures that running infrastructure perfectly matches a declarative Git baseline (`docker-compose.yml`), neutralizing configuration drift and unauthorized "shadow IT" workloads through real-time Docker socket monitoring.
+DriftWarden is a lightweight GitOps guardrail and drift-remediation daemon for standalone Docker hosts. It treats a `docker-compose.yml` hosted on GitHub as the single declarative source of truth and continuously watches the host's Docker socket so live workloads never diverge from it silently.
 
-## 🎯 Project Purpose
+## 🎯 What it does
 
-Standalone Docker hosts often suffer from configuration drift when engineers bypass CI/CD pipelines to manually execute `docker run` commands or edit live containers for emergency hotfixes. DriftWarden solves this by providing a closed-loop GitOps reconciliation engine directly on the host machine. 
+Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker run` commands or hot-edit live containers. DriftWarden closes the loop directly on the host:
 
-**Core Capabilities:**
-*   **Zero-Trust Host Monitoring:** Detects rogue containers lacking managed Compose namespace tags.
-*   **Real-time Diff Engine:** Compares live host state against a remote GitHub declarative baseline.
-*   **Remediation Paths:** Resolves conflicts through two distinct mechanisms: 
-    *   **Enforce (Revert):** Terminates and recreates drifted containers to strictly match the Git baseline.
-    *   **Adopt (Reverse-GitOps):** Reverse-engineers manual container hotfixes into YAML AST mutations to generate automated Pull Requests.
-## 🤝 Project Ownership Boundary
+* **Zero-trust host monitoring.** Every container on the host is in scope. Labels state intent, Git decides legitimacy: a container with correct Compose labels but no declared service is still `ROGUE`.
+* **Real-time diff engine.** Docker events trigger a reconcile against the cached Git baseline; a structured per-field diff (`image`, `ports`, `environment`, `volumes`, `labels`, `restart`, `networks`) feeds the side-by-side viewer.
+* **Two remediation paths.**
+  * **Enforce / Revert** recreates a `DRIFTED` or `MISSING` service from the baseline through the Docker SDK (`containers.run`, never `docker compose`), and stops and removes `ROGUE` containers.
+  * **Adopt (Reverse-GitOps)** reverse-engineers the live container into a comment-preserving YAML mutation and opens a pull request on the infrastructure repository. Environment values are never committed; keys become `${KEY}` placeholders.
+* **State buffer.** Adopted containers stay `PENDING_ADOPTION`, exempt from enforcement, until the merged baseline is ingested or the TTL expires, whichever comes first.
+* **Whitelist.** Operators can exempt a container or an entire foreign Compose project from the dashboard; the exemption lives in SQLite.
 
-This capstone is collaboratively developed with strict domain boundaries to minimize merge conflicts and ensure architectural separation of concerns:
+### Drift states
 
-*   **Noor Al-deen:** Core Daemon Engine. Responsible for the `docker-py` event stream ingestion, GitHub REST API (`PyGithub`) integration, YAML AST parsing (`ruamel.yaml`), Zero-Trust boundary logic, and CLI toolchain (`Makefile`).
-*   **Naeam:** Control Plane & Persistence. Responsible for the FastAPI web server, SQLite database schema (`SQLAlchemy`), internal API routing, and the Jinja2/Tailwind CSS interactive dashboard.
+| State | Meaning |
+| --- | --- |
+| `MATCHED` | Running container matches its baseline service. |
+| `DRIFTED` | Declared service exists but a compared field, or the runtime state (`paused`, `restarting`, `dead`), differs. |
+| `MISSING` | Declared service has no container, or only a stopped / exited one. |
+| `ROGUE` | Container not declared in Git: unlabelled, from another Compose project, spoofed labels, or a duplicate replica. |
+| `PENDING_ADOPTION` | Buffered while an adoption pull request deploys. |
 
-## ⚠️ Security Warning: Docker Socket Access
+### Evaluation order
 
-**CRITICAL:** DriftWarden requires a direct bind to the host's Docker socket (`/var/run/docker.sock`) to subscribe to the event stream and issue remediation commands. Access to the Docker socket is equivalent to root-level execution privileges on the host machine. 
-*   This tool is intended for standalone development and staging environments.
-*   Do not expose the FastAPI Control Plane port (default: 8000) to the public internet without an external reverse proxy and authentication layer.
+1. **Hard exclusions**: DriftWarden's own container, name prefixes in `EXCLUDED_NAME_PREFIXES` (`warden-`, `driftwarden`, `k8s_`), and the label `warden.ignore=true`.
+2. **Whitelist** (`whitelisted_entities` table): container id, container name or Compose project.
+3. **Managed namespace** (`com.docker.compose.project` equal to the baseline's `name:`, or `COMPOSE_NAMESPACE` when `name:` is absent): map to a service by the `com.docker.compose.service` label, falling back to the `<project>-<service>-<n>` name pattern, then diff.
+4. **Everything else** is `ROGUE`.
 
-## 🚀 Local Installation & Environment Setup
+## 🏗️ Architecture
 
-DriftWarden requires Python 3.10+ and a local Docker engine.
+```
+GitHub (TARGET_REPO)  ──PyGithub, ETag cached──▶  baseline_parser  ──▶  Baseline (canonical services)
+                                                                            │
+Docker socket  ──events thread ──▶ asyncio.Queue ──debounce──▶  reconciler ─┼─▶ diff_engine ─▶ HostSnapshot
+               ──inspect / run / rm ◀──────────────────────────────────────┘        │
+                                                                                      ▼
+SQLite (audit_log, pending_adoptions, whitelisted_entities, drift_events)   state_projector ─▶ SSE ─▶ dashboard
+```
 
-**1. Clone the repository & create an isolated virtual environment:**
+Everything runs inside one FastAPI process: the engine lives in the application lifespan, the web layer reads the in-memory snapshot through a typed accessor, and SQLite holds only what must survive a restart.
+
+| Package | Role |
+| --- | --- |
+| `src/shared` | Pydantic boundary contracts, enums, exception hierarchy. |
+| `src/warden/config.py` | `WardenSettings`, the single settings object. |
+| `src/warden/core` | `baseline_parser` (Compose normalisation) and `docker_watcher` (events, inspect, kill, recreate). |
+| `src/warden/engine` | `diff_engine` (pure classification), `reconciler` (loops, enforcement, actions), `state_projector` (snapshot + SSE). |
+| `src/warden/automation` | `github_client` (baseline fetch, PR creation) and `yaml_mutator` (ruamel round-trip edits). |
+| `src/web` | FastAPI app, SQLAlchemy 2.0 tables, routes, Jinja2 templates, vanilla JS. |
+
+## ⚠️ Security warning: Docker socket access
+
+DriftWarden binds to the host's Docker socket to subscribe to events and issue remediation commands. Socket access is equivalent to root on the host.
+
+* Intended for standalone development and staging hosts.
+* The control plane has **no authentication**. Keep port 8000 on an internal network or behind a reverse proxy with its own auth.
+* The GitHub token needs the `repo` scope. If it is rejected the daemon still starts, in degraded observe mode, with a `BASELINE_UNAVAILABLE` banner.
+
+## 🚀 Installation
+
+Python 3.10+ and a local Docker engine are required.
+
 ```bash
 git clone <your-repo-url>
 cd DriftWarden
 python -m venv venv
-source venv/bin/activate  # On Windows PowerShell: .\venv\Scripts\activate
-```
-
-**2. Install dependencies in development mode:**
-```bash
+source venv/bin/activate      # Windows PowerShell: .\venv\Scripts\activate
 make install-dev
+cp .env.example .env          # then fill in GITHUB_PAT, TARGET_REPO, BASELINE_FILE_PATH ...
+make start                    # http://localhost:8000
 ```
 
-**3. Configure Environment Variables:**
-Copy the example template and populate it with your GitHub Personal Access Token (PAT) and repository details.
+`make start` runs `uvicorn web.app:app --app-dir src`; the import root is always `src` (`PYTHONPATH=src`).
+
+### Running as a container
+
 ```bash
-cp .env.example .env
+docker build -t driftwarden .
+docker run -d --name driftwarden \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --env-file .env -p 8000:8000 driftwarden
 ```
-*Note: Ensure your GitHub PAT has the `repo` scope to read YAML files and create Pull Requests.*
 
-## ⚙️ Operating Modes
+The container detects its own id and excludes itself from evaluation.
 
-DriftWarden is configured via the `WARDEN_MODE` environment variable to support different deployment safety requirements:
+## ⚙️ Configuration
 
-*   **Observe Mode (`WARDEN_MODE=observe`):** The engine monitors the Docker socket, detects drift, flags rogue containers, and logs alerts to SQLite, but **never automatically mutates the host**. Remediation requires a human to click [Revert] or [Adopt] in the web UI. *(Recommended for Production)*
-*   **Enforce Mode (`WARDEN_MODE=enforce`):** The engine acts ruthlessly and autonomously. It immediately terminates rogue containers and kills/recreates drifted containers to match the Git baseline without waiting for human approval.
+All settings come from environment variables or `.env` (see `.env.example`).
 
-## 🛠️ Development Workflow & Make Targets
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GITHUB_PAT`, `TARGET_REPO`, `TARGET_BRANCH`, `BASELINE_FILE_PATH` | — | Where the baseline lives and the token used to read it and open PRs. |
+| `BASELINE_POLL_INTERVAL_SECONDS` | `30` | Poll interval; unchanged files return `304` via the cached ETag and cost no API quota. |
+| `ALLOW_MOCK_BASELINE` | `false` | Load `tests/fixtures/docker-compose.test.yaml` instead of GitHub (adoption is disabled). |
+| `COMPOSE_NAMESPACE` | — | Fallback project name when the baseline has no `name:`. |
+| `WARDEN_MODE` | `observe` | `observe`: detect and wait for an operator. `enforce`: autonomous remediation after the startup pass. Read-only at runtime. |
+| `DRIFT_DEBOUNCE_SECONDS` | `2` | Single global quiet window that coalesces Docker events into one reconcile. |
+| `RECONCILE_SWEEP_INTERVAL_SECONDS` | `60` | Periodic full reconcile for events missed during reconnects. |
+| `ENFORCEMENT_GRACE_SECONDS` | `30` | Enforcement is suppressed this long after every baseline change, and the baseline is re-fetched before any destructive action. |
+| `ADOPTION_BUFFER_TTL_SECONDS` | `180` | Safety timeout for the pending-adoption buffer. |
+| `EXCLUDED_NAME_PREFIXES` | `warden-,driftwarden,k8s_` | Containers never evaluated. |
+| `DOCKER_SOCKET_PATH` / `DOCKER_BASE_URL` | `/var/run/docker.sock` / unset | Socket path, or an explicit `npipe://` / `tcp://` URL; otherwise `docker.from_env()`. |
+| `DATABASE_URL` | `sqlite:///./warden.db` | Audit log, buffer, whitelist and drift events (WAL mode). |
+| `WARDEN_HOSTNAME` | machine hostname | Friendly name shown in the UI and stamped on audit rows. |
 
-DriftWarden relies on a `Makefile` to abstract complex shell commands and ensure consistent development practices.
+## 🖥️ Control plane
 
-**Core Workflow:**
-*   `make start` - Boots the FastAPI Control Plane and the async Engine loop with live-reload enabled.
-*   `make check` - Runs formatting, linting, strict type-checking (`mypy`), and the test suite without mutating files. Run this before every Git commit.
-*   `make clean` - Wipes all Python caches (`__pycache__`) and deletes the local SQLite database to start fresh.
+| Page / endpoint | Purpose |
+| --- | --- |
+| `/` | Dashboard: counters, live table, Revert / Kill / Adopt / Whitelist actions, updated over Server-Sent Events. |
+| `/diff/{name}` | Git baseline on the left, live observed state on the right, field-by-field table, action buttons. |
+| `/events` | Drift transitions and the audit log. |
+| `/buffer` | Active and historical pending adoptions. |
+| `/config` | Effective settings, the raw baseline, exclusions and whitelist management. |
+| `GET /api/state`, `GET /api/state/stream` | Snapshot JSON and the SSE stream. |
+| `POST /api/actions/revert/{ref}`, `/kill/{ref}`, `/adopt/{ref}` | Operator actions (same code path as enforce mode). |
+| `GET/POST /api/whitelist`, `DELETE /api/whitelist/{id}` | Exemptions. |
+| `GET /api/audit`, `/api/events`, `/api/buffer`, `/api/health`, `POST /api/reconcile` | Data and a manual refresh. |
 
-**Code Quality Targets:**
-*   `make format` - Formats the codebase using Ruff.
-*   `make lint` - Runs Ruff static analysis to catch syntax or import errors.
-*   `make typecheck` - Validates strict type boundaries using MyPy.
-*   `make test` - Executes the full `pytest` suite.
+## 🛠️ Development workflow
 
-**Capstone Presentation Demo Runners:**
-*   `make demo-infra-up` - Bootstraps the baseline test infrastructure from local fixtures.
-*   `make demo-drift` - Injects targeted chaos into the host (spawns an unlabelled rogue database, kills a required web container, and mutates a cache container's image tag while spoofing namespace labels).
-*   `make demo-clean` - Wipes all demo containers and resets the local Docker daemon.
+* `make start` boots the control plane and engine with live reload.
+* `make check` runs `ruff format --check`, `ruff check`, `mypy src/` (strict) and `pytest`. Run it before every commit.
+* `make format`, `make lint`, `make typecheck`, `make test` run the individual tools.
+* `make clean` wipes caches.
+
+Conventions: Python 3.10 syntax floor, `X | None` unions, Pydantic at every boundary and dataclasses inside the engine, Loguru only, `ruamel.yaml` round-trip only, PyGithub only (no subprocess git), no SPA frameworks.
+
+## 🎬 Demo runners
+
+```bash
+make demo-infra-up   # docker compose up the fixture stack (project infrastructure-test)
+make demo-drift      # rogue mariadb, delete web (MISSING), spoofed redis:latest cache (DRIFTED)
+make demo-clean      # tear everything down
+```
+
+With the dashboard open, `make demo-drift` shows one `ROGUE`, one `MISSING` and one `DRIFTED` entry within the debounce window. Click **Enforce Baseline (Rollback)** on the cache to recreate it from Git, or **Adopt into Git (Auto-PR)** on the rogue database to open a pull request on `TARGET_REPO`.

@@ -36,8 +36,7 @@
                 {% if snapshot.baseline.sha %}<span class="text-slate-600">@{{ snapshot.baseline.sha[:12] }}</span>{% endif %}
             </div>
             {% if record.expected_yaml %}
-                <pre class="code-pane">{% for line in record.expected_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}del{% endif %}">{{ line }}</span>
-{% endfor %}</pre>
+                <pre class="code-pane">{% for line in record.expected_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}del{% endif %}">{{ line }}</span>{% endfor %}</pre>
             {% else %}
                 <pre class="code-pane"><span class="line del">- (Service not declared in Git repository)</span></pre>
             {% endif %}
@@ -52,8 +51,7 @@
                 {% if record.container_name %}container: {{ record.container_name }} <span class="text-slate-600">({{ record.container_id[:12] }}, detected via docker socket)</span>{% else %}no container{% endif %}
             </div>
             {% if record.observed_yaml %}
-                <pre class="code-pane">{% for line in record.observed_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'rogue' %}add{% elif record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}add{% endif %}">{{ line }}</span>
-{% endfor %}</pre>
+                <pre class="code-pane">{% for line in record.observed_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'rogue' %}add{% elif record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}add{% endif %}">{{ line }}</span>{% endfor %}</pre>
             {% else %}
                 <pre class="code-pane"><span class="line del">- (No container running on {{ hostname }})</span></pre>
             {% endif %}

@@ -1,7 +1,7 @@
 """Engine behaviour with Docker and GitHub replaced by in-memory fakes."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
@@ -18,12 +18,23 @@ from warden.engine.state_projector import StateProjector
 from web.db.repository import Store
 from web.db.session import Database
 
+_databases: list[Database] = []
+
+
+@pytest.fixture(autouse=True)
+def _dispose_databases() -> Iterator[None]:
+    """Close every SQLite engine a test opened so no connection leaks."""
+    yield
+    while _databases:
+        _databases.pop().close()
+
 
 def build(
     settings: WardenSettings, watcher: FakeWatcher, github: FakeGitHub | None = None
 ) -> tuple[Reconciler, Store]:
     database = Database(settings.database_url)
     database.init()
+    _databases.append(database)
     store = Store(database, settings.hostname)
     projector = StateProjector(settings.hostname, settings.warden_mode)
     reconciler = Reconciler(settings, watcher, store, projector, github)  # type: ignore[arg-type]

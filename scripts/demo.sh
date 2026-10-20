@@ -22,8 +22,8 @@ case "$COMMAND" in
     docker run -d --name infrastructure-test-cache-1 -p 6378:6378 \
         --label com.docker.compose.project=infrastructure-test \
         --label com.docker.compose.service=cache \
-        --label sentinel.managed=true \
-        --label sentinel.repo=my-cs-project \
+        --label warden.managed=true \
+        --label warden.repo=my-cs-project \
         redis:latest
         
     echo "✅ Chaos injected. Watch the DriftWarden dashboard react!"

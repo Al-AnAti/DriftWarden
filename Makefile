@@ -63,7 +63,7 @@ check:
 
 start:
 	@echo "🚀 Starting DriftWarden Control Plane & Engine Loop..."
-	uvicorn src.web.app:app --reload --port 8000
+	uvicorn web.app:app --app-dir src --reload --port 8000
 
 clean:
 	$(BASH_CMD) scripts/clean.sh

@@ -8,13 +8,13 @@ services:
     ports:
       - "8080:80"
     labels:
-      - "sentinel.managed=true"
-      - "sentinel.repo=my-cs-project"
+      - "warden.managed=true"
+      - "warden.repo=my-cs-project"
   
   cache:
     image: redis:alpine
     ports:
       - "6379:6379"
     labels:
-      - "sentinel.managed=true"
-      - "sentinel.repo=my-cs-project"
+      - "warden.managed=true"
+      - "warden.repo=my-cs-project"

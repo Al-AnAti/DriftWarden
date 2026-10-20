@@ -14,7 +14,7 @@ DriftWarden runs directly on the host machine to eliminate configuration drift a
    - **Enforce:** Surgically terminates rogue/unauthorized containers via Docker SDK.
    - **Adopt (Reverse-GitOps):** Inspects live container state, mutates the Compose AST using `ruamel.yaml` (preserving comments and formatting), and submits an automated Pull Request via PyGithub.
 5. **Lifespan Integration:** The watcher, reconciler, and state projector run entirely inside FastAPI's `@asynccontextmanager` application lifespan event loop on the same process.
-6. **State Buffer (SQLite):** During an Adopt action, the engine writes the container to a local `pending_adoptions` SQLite table to suppress false-positive drift alerts while waiting for the GitHub Actions CI/CD pipeline to deploy the merged code.
+6. **State Buffer (SQLite):** During an Adopt action, the engine writes the container to a local `pending_adoptions` SQLite table (plain SQLAlchemy 2.0 declarative models; no SQLModel) to suppress false-positive drift alerts while waiting for the GitHub Actions CI/CD pipeline to deploy the merged code.
 ---
 
 ## 2. Directory & Scope Boundaries
@@ -26,8 +26,8 @@ Adhere to the repository layout:
 ├── .env.example
 ├── Makefile
 ├── scripts/
-│   ├── trigger_drift.sh
-│   └── trigger_rogue.sh
+│   ├── clean.sh
+│   └── demo.sh
 ├── src/
 │   ├── shared/
 │   │   ├── constants.py
@@ -96,7 +96,7 @@ Always validate modifications using the project `Makefile`. Execute these exact 
 - **Format Code:** `make format` (runs `ruff format .` and `ruff check --fix .`)
 - **Lint Code:** `make lint` (runs `ruff check .`)
 - **Run Test Suite:** `make test` (runs `pytest tests/ -v`)
-- **Local Server Verification:** `make start` (runs `uvicorn src.web.app:app --reload --port 8000`)
+- **Local Server Verification:** `make start` (runs `uvicorn web.app:app --app-dir src --reload --port 8000`)
 
 ### Test Environment Assumptions
 - Docker engine is active locally with the socket at `/var/run/docker.sock`.

@@ -9,16 +9,32 @@ class DriftWardenError(Exception):
     """
 
 
+class ConfigurationError(DriftWardenError):
+    """Raised when required configuration cannot be resolved at runtime."""
+
+
 class GitBaselineFetchError(DriftWardenError):
     """Raised when the declarative Docker Compose baseline cannot be fetched."""
+
+
+class BaselineParseError(DriftWardenError):
+    """Raised when the fetched baseline is not a valid Compose document."""
 
 
 class RogueContainerKillError(DriftWardenError):
     """Raised when enforcement cannot terminate a rogue container."""
 
 
+class ContainerRecreateError(DriftWardenError):
+    """Raised when a service cannot be recreated from its baseline definition."""
+
+
 class YAMLMutationError(DriftWardenError):
     """Raised when a Compose YAML abstract syntax tree cannot be mutated safely."""
+
+
+class AdoptionError(DriftWardenError):
+    """Raised when an adoption request cannot be turned into a pull request."""
 
 
 class DockerConnectionError(DriftWardenError):

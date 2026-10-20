@@ -5,6 +5,41 @@ from enum import Enum
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
 """Docker Compose label used to identify the owning Compose project."""
 
+COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
+"""Docker Compose label naming the service a container was created from."""
+
+COMPOSE_CONTAINER_NUMBER_LABEL = "com.docker.compose.container-number"
+"""Docker Compose label carrying the replica index of a container."""
+
+COMPOSE_LABEL_PREFIX = "com.docker.compose."
+"""Prefix shared by every label Docker Compose injects on its own."""
+
+WARDEN_IGNORE_LABEL = "warden.ignore"
+"""Opt-out label: containers carrying ``warden.ignore=true`` are never evaluated."""
+
+WARDEN_MANAGED_BY_LABEL = "warden.managed-by"
+"""Label stamped on every container DriftWarden creates or recreates."""
+
+WARDEN_MANAGED_BY_VALUE = "driftwarden"
+"""Value written under :data:`WARDEN_MANAGED_BY_LABEL`."""
+
+WARDEN_ACTION_LABEL = "warden.action-id"
+"""Label carrying the enforcement action id that created a container."""
+
+DEFAULT_EXCLUDED_NAME_PREFIXES: tuple[str, ...] = ("warden-", "driftwarden", "k8s_")
+"""Container name prefixes that are always excluded from evaluation."""
+
+DIFF_FIELDS: tuple[str, ...] = (
+    "image",
+    "ports",
+    "environment",
+    "volumes",
+    "labels",
+    "restart",
+    "networks",
+)
+"""Service attributes compared by the diff engine, in display order."""
+
 
 class DriftStatus(str, Enum):
     """Describes how a running or expected service relates to the Git baseline."""
@@ -26,16 +61,84 @@ class DriftStatus(str, Enum):
 
 
 class AuditAction(str, Enum):
-    """Identifies an auditable action performed by the control plane."""
+    """Identifies an auditable action performed by the control plane or engine."""
 
     ENFORCE_KILL = "enforce_kill"
     """A rogue container was terminated by enforcement."""
 
+    ENFORCE_KILL_FAILED = "enforce_kill_failed"
+    """Enforcement tried to terminate a rogue container and failed."""
+
     REVERT_REQUESTED = "revert_requested"
-    """A drifted container was manually commanded to revert to the Git baseline."""
+    """A drifted or missing service was commanded to revert to the Git baseline."""
+
+    REVERT_COMPLETED = "revert_completed"
+    """A service was recreated from the Git baseline successfully."""
+
+    REVERT_FAILED = "revert_failed"
+    """Recreating a service from the Git baseline failed."""
 
     ADOPT_REQUESTED = "adopt_requested"
-    """An adoption request was created for a drifted container."""
+    """An adoption request was created for a rogue or drifted container."""
+
+    ADOPT_PR_OPENED = "adopt_pr_opened"
+    """A Reverse-GitOps pull request was opened for an adopted container."""
+
+    ADOPT_FAILED = "adopt_failed"
+    """An adoption request could not be turned into a pull request."""
+
+    ADOPTION_CLEARED = "adoption_cleared"
+    """A pending adoption was cleared because the baseline now declares the service."""
+
+    ADOPTION_EXPIRED = "adoption_expired"
+    """A pending adoption reached its TTL before the baseline declared the service."""
 
     BASELINE_FETCHED = "baseline_fetched"
     """The declarative baseline was fetched successfully."""
+
+    BASELINE_FETCH_FAILED = "baseline_fetch_failed"
+    """The declarative baseline could not be fetched."""
+
+    ROGUE_DETECTED = "rogue_detected"
+    """A container with no declaration in the baseline appeared on the host."""
+
+    DRIFT_DETECTED = "drift_detected"
+    """A managed container diverged from its baseline definition."""
+
+    MISSING_DETECTED = "missing_detected"
+    """A baseline service has no running container."""
+
+    STATE_RESTORED = "state_restored"
+    """A previously rogue, drifted or missing entry returned to the baseline state."""
+
+    WHITELIST_ADDED = "whitelist_added"
+    """An operator exempted a container or Compose project from evaluation."""
+
+    WHITELIST_REMOVED = "whitelist_removed"
+    """An operator removed a whitelist exemption."""
+
+    ENGINE_STARTED = "engine_started"
+    """The reconciliation engine finished its startup pass."""
+
+
+class WhitelistTargetType(str, Enum):
+    """Kinds of entity an operator can exempt from drift evaluation."""
+
+    CONTAINER = "CONTAINER"
+    """A single container, matched by id or name."""
+
+    PROJECT = "PROJECT"
+    """An entire Compose project, matched by its ``com.docker.compose.project`` label."""
+
+
+class BaselineSource(str, Enum):
+    """Where the currently cached baseline came from."""
+
+    GITHUB = "github"
+    """Fetched from the configured GitHub repository."""
+
+    MOCK = "mock"
+    """Loaded from the local fixture because ``ALLOW_MOCK_BASELINE`` is set."""
+
+    UNAVAILABLE = "unavailable"
+    """No baseline has been loaded yet; the engine runs in degraded observe mode."""

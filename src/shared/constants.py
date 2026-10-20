@@ -11,6 +11,9 @@ COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
 COMPOSE_CONTAINER_NUMBER_LABEL = "com.docker.compose.container-number"
 """Docker Compose label carrying the replica index of a container."""
 
+COMPOSE_ONEOFF_LABEL = "com.docker.compose.oneoff"
+"""Docker Compose label distinguishing service containers from one-off runs."""
+
 COMPOSE_LABEL_PREFIX = "com.docker.compose."
 """Prefix shared by every label Docker Compose injects on its own."""
 

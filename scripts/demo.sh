@@ -32,7 +32,8 @@ case "$COMMAND" in
   clean)
     echo "🧹 Wiping demo containers and resetting host..."
     docker compose -f tests/fixtures/docker-compose.test.yaml down
-    docker rm -f rogue-db infrastructure-test-cache-1 || true
+    docker rm -f rogue-db infrastructure-test-cache-1 infrastructure-test-web-1 2>/dev/null || true
+    docker network rm infrastructure-test_default 2>/dev/null || true
     echo "✅ Environment completely reset."
     ;;
     

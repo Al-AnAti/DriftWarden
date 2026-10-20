@@ -19,6 +19,7 @@ from loguru import logger
 
 from shared.constants import (
     COMPOSE_CONTAINER_NUMBER_LABEL,
+    COMPOSE_ONEOFF_LABEL,
     COMPOSE_PROJECT_LABEL,
     COMPOSE_SERVICE_LABEL,
     WARDEN_ACTION_LABEL,
@@ -553,6 +554,7 @@ class DockerWatcher:
                 COMPOSE_PROJECT_LABEL: project,
                 COMPOSE_SERVICE_LABEL: service.service_name,
                 COMPOSE_CONTAINER_NUMBER_LABEL: "1",
+                COMPOSE_ONEOFF_LABEL: "False",
                 WARDEN_MANAGED_BY_LABEL: WARDEN_MANAGED_BY_VALUE,
                 WARDEN_ACTION_LABEL: action_id,
             }

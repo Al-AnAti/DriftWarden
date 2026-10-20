@@ -15,7 +15,7 @@ endif
 
 export PYTHONPATH = src
 
-.PHONY: install install-dev format lint typecheck test test-warden start check clean demo-infra-up demo-drift demo-clean
+.PHONY: install install-dev format lint typecheck test coverage start check clean demo-infra-up demo-drift demo-clean
 
 # ------------------------------------------
 # Setup & Dependency Management
@@ -49,6 +49,10 @@ typecheck:
 test:
 	@echo "🧪 Running all unit tests..."
 	pytest tests/ -v
+
+coverage:
+	@echo "📊 Running unit tests with coverage..."
+	pytest tests/ -q --cov=src --cov-report=term-missing
 
 check:
 	@echo "🚦 Running CI pipeline checks (No files will be mutated)..."

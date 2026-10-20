@@ -68,6 +68,9 @@ from warden.engine.store import StateStore
 ACTION_CACHE_TTL_SECONDS = 20.0
 """How long a container id/name/action id stays in the self-action cache."""
 
+ENFORCEMENT_COOLDOWN_SECONDS = 60.0
+"""Minimum time between two autonomous actions on the same entry (loop guard)."""
+
 
 class Reconciler:
     """Coordinates baseline ingestion, Docker events, diffing and remediation.
@@ -105,6 +108,7 @@ class Reconciler:
         self._tasks: list[asyncio.Task[None]] = []
         self._cycle_lock = asyncio.Lock()
         self._action_cache: dict[str, float] = {}
+        self._enforced_at: dict[str, float] = {}
         self._image_env_cache: dict[str, dict[str, str]] = {}
         self._image_labels_cache: dict[str, dict[str, str]] = {}
         self._pending: dict[str, PendingAdoption] = {}
@@ -450,7 +454,7 @@ class Reconciler:
                 {k: v for k, v in snapshot.counts().items() if v},
             )
 
-        if snapshot.enforcement_active and trigger != "startup":
+        if snapshot.enforcement_active and trigger not in ("startup", "post-enforce"):
             acted = await self._enforce(snapshot)
             if acted:
                 self.schedule_reconcile("post-enforce")
@@ -518,7 +522,18 @@ class Reconciler:
         if not self.enforcement_active:
             return False
         acted = False
+        now = time.monotonic()
         for record in targets:
+            last = self._enforced_at.get(record.ref)
+            if last is not None and now - last < ENFORCEMENT_COOLDOWN_SECONDS:
+                logger.warning(
+                    "Skipping enforcement of {}: acted {:.0f}s ago and it is still {}",
+                    record.ref,
+                    now - last,
+                    record.drift_status.value,
+                )
+                continue
+            self._enforced_at[record.ref] = now
             try:
                 if record.drift_status is DriftStatus.ROGUE:
                     await self._kill_record(record, autonomous=True)

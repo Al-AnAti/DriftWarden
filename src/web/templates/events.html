@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Events Log &middot; DriftWarden{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-bold tracking-tight">Events Log</h1>
+        <a href="/events" class="text-sm text-indigo-300 hover:underline">Refresh</a>
+    </div>
+
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <header class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+            <h2 class="font-semibold">Drift transitions</h2>
+            <span class="text-xs text-slate-500">{{ events | length }} shown</span>
+        </header>
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
+                <tr><th class="text-left px-6 py-2">When (UTC)</th><th class="text-left px-6 py-2">Entry</th><th class="text-left px-6 py-2">Transition</th><th class="text-left px-6 py-2">Details</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+                {% for e in events %}
+                <tr>
+                    <td class="px-6 py-2 font-mono text-xs text-slate-400 whitespace-nowrap">{{ e.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-6 py-2 font-mono"><a class="text-indigo-300 hover:underline" href="/diff/{{ e.ref }}">{{ e.ref }}</a></td>
+                    <td class="px-6 py-2 whitespace-nowrap">
+                        {% if e.previous_status %}<span class="badge tone-{{ status_meta[e.previous_status].tone }}">{{ status_meta[e.previous_status].label }}</span> &rarr; {% endif %}
+                        <span class="badge tone-{{ status_meta[e.drift_status].tone }}">{{ status_meta[e.drift_status].label }}</span>
+                    </td>
+                    <td class="px-6 py-2 text-xs text-slate-400">{{ e.details or '' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="px-6 py-8 text-center text-slate-500">No transitions recorded yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <header class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+            <h2 class="font-semibold">Audit log</h2>
+            <span class="text-xs text-slate-500">{{ audit | length }} shown</span>
+        </header>
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
+                <tr><th class="text-left px-6 py-2">When (UTC)</th><th class="text-left px-6 py-2">Action</th><th class="text-left px-6 py-2">Target</th><th class="text-left px-6 py-2">Host</th><th class="text-left px-6 py-2">Details</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+                {% for a in audit %}
+                <tr>
+                    <td class="px-6 py-2 font-mono text-xs text-slate-400 whitespace-nowrap">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-6 py-2 font-mono text-xs {% if 'failed' in a.action.value %}text-rose-300{% elif 'detected' in a.action.value %}text-amber-300{% elif a.action.value in ('revert_completed', 'adopt_pr_opened', 'state_restored') %}text-emerald-300{% else %}text-slate-300{% endif %}">{{ a.action.value }}</td>
+                    <td class="px-6 py-2 font-mono text-xs">{{ a.target }}</td>
+                    <td class="px-6 py-2 font-mono text-xs text-slate-500">{{ a.hostname or '' }}</td>
+                    <td class="px-6 py-2 text-xs text-slate-400 break-all">{{ a.details or '' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No audit rows yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}{{ record.ref }} &middot; DriftWarden{% endblock %}
+
+{% block content %}
+{% set meta = status_meta[record.drift_status.value] %}
+<div class="space-y-6" data-diff-ref="{{ record.ref }}" data-diff-status="{{ record.drift_status.value }}">
+    <div class="flex flex-wrap items-center gap-3">
+        <a href="/" class="text-slate-500 hover:text-slate-300 text-sm">&larr; Dashboard</a>
+        <h1 class="text-2xl font-bold tracking-tight">
+            {{ meta.label }}
+            {% if record.container_name %}container: <span class="font-mono">{{ record.container_name }}</span>{% else %}service: <span class="font-mono">{{ record.service_name }}</span>{% endif %}
+        </h1>
+        <span id="diff-status-badge" class="badge tone-{{ meta.tone }}">{{ meta.label }}</span>
+        {% if record.project %}<span class="badge tone-slate">project: {{ record.project }}</span>{% endif %}
+        <span class="badge tone-slate">docker: {{ record.status }}</span>
+    </div>
+
+    <div class="banner tone-{{ meta.tone }}">
+        <strong>{% if record.drift_status.value == 'rogue' %}⚠️ SHADOW IT{% elif record.drift_status.value == 'drifted' %}⚠️ DRIFT{% elif record.drift_status.value == 'missing' %}🕳️ MISSING{% elif record.drift_status.value == 'pending_adoption' %}⏳ PENDING ADOPTION{% else %}✅ MATCHED{% endif %}</strong>
+        &mdash; {{ record.message }}
+        {% if record.pending_adoption and record.pending_adoption.pr_url %}
+            <a class="underline ml-1" target="_blank" href="{{ record.pending_adoption.pr_url }}">Open PR #{{ record.pending_adoption.pr_number }}</a>
+            &middot; expires {{ record.pending_adoption.expires_at.strftime('%H:%M:%S') }} UTC
+        {% endif %}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <header class="px-5 py-4 border-b border-slate-800 flex items-center gap-2">
+                <span>📄</span>
+                <h2 class="font-semibold">Git Baseline ({{ snapshot.baseline.path or 'docker-compose.yml' }})</h2>
+            </header>
+            <div class="px-5 py-3 text-xs font-mono text-slate-400 border-b border-slate-800">
+                {{ snapshot.baseline.branch or snapshot.baseline.source.value }} / {{ snapshot.baseline.path or '' }}
+                {% if snapshot.baseline.sha %}<span class="text-slate-600">@{{ snapshot.baseline.sha[:12] }}</span>{% endif %}
+            </div>
+            {% if record.expected_yaml %}
+                <pre class="code-pane">{% for line in record.expected_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}del{% endif %}">{{ line }}</span>
+{% endfor %}</pre>
+            {% else %}
+                <pre class="code-pane"><span class="line del">- (Service not declared in Git repository)</span></pre>
+            {% endif %}
+        </section>
+
+        <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <header class="px-5 py-4 border-b border-slate-800 flex items-center gap-2">
+                <span>🐳</span>
+                <h2 class="font-semibold">Live Observed State ({{ hostname }})</h2>
+            </header>
+            <div class="px-5 py-3 text-xs font-mono text-slate-400 border-b border-slate-800">
+                {% if record.container_name %}container: {{ record.container_name }} <span class="text-slate-600">({{ record.container_id[:12] }}, detected via docker socket)</span>{% else %}no container{% endif %}
+            </div>
+            {% if record.observed_yaml %}
+                <pre class="code-pane">{% for line in record.observed_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'rogue' %}add{% elif record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}add{% endif %}">{{ line }}</span>
+{% endfor %}</pre>
+            {% else %}
+                <pre class="code-pane"><span class="line del">- (No container running on {{ hostname }})</span></pre>
+            {% endif %}
+        </section>
+    </div>
+
+    {% if record.diffs %}
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <header class="px-5 py-4 border-b border-slate-800"><h2 class="font-semibold">Field by field</h2></header>
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
+                <tr><th class="text-left px-5 py-2">Field</th><th class="text-left px-5 py-2">Baseline (expected)</th><th class="text-left px-5 py-2">Live (observed)</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 font-mono text-xs">
+                {% for d in record.diffs %}
+                <tr class="{% if d.changed %}bg-amber-950/30{% endif %}">
+                    <td class="px-5 py-2 {% if d.changed %}text-amber-300 font-semibold{% else %}text-slate-400{% endif %}">{{ d.field }}{% if d.changed %} ✱{% endif %}</td>
+                    <td class="px-5 py-2 {% if d.changed %}text-rose-300{% else %}text-slate-300{% endif %}">{{ d.expected }}</td>
+                    <td class="px-5 py-2 {% if d.changed %}text-emerald-300{% else %}text-slate-300{% endif %}">{{ d.observed }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    {% if record.actions %}
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-wrap justify-center gap-6">
+        {% if 'revert' in record.actions %}
+        <div class="text-center">
+            <button onclick="wardenAction('revert', '{{ record.ref }}')" class="btn-lg btn-rose">[🗑️ Enforce Baseline (Rollback)]</button>
+            <p class="text-xs text-slate-400 mt-2">Recreates <span class="font-mono">{{ record.service_name }}</span> exactly as declared in Git</p>
+        </div>
+        {% endif %}
+        {% if 'kill' in record.actions %}
+        <div class="text-center">
+            <button onclick="wardenAction('kill', '{{ record.ref }}')" class="btn-lg btn-rose">[🗑️ Enforce Kill]</button>
+            <p class="text-xs text-slate-400 mt-2">Surgically stops and removes this untracked container</p>
+        </div>
+        {% endif %}
+        {% if 'adopt' in record.actions %}
+        <div class="text-center">
+            <button onclick="wardenAction('adopt', '{{ record.ref }}')" class="btn-lg btn-emerald">[🚀 Adopt into Git (Auto-PR)]</button>
+            <p class="text-xs text-slate-400 mt-2">Synthesize YAML, cut branch, and open GitHub PR</p>
+        </div>
+        {% endif %}
+        {% if 'whitelist' in record.actions %}
+        <div class="text-center">
+            <button onclick="wardenWhitelist('CONTAINER', '{{ record.container_name }}')" class="btn-lg btn-ghost">[🏳️ Whitelist container]</button>
+            <p class="text-xs text-slate-400 mt-2">Record an exemption so it keeps running undisturbed</p>
+        </div>
+        {% endif %}
+        {% if 'whitelist_project' in record.actions %}
+        <div class="text-center">
+            <button onclick="wardenWhitelist('PROJECT', '{{ record.project }}')" class="btn-lg btn-ghost">[🏳️ Whitelist project {{ record.project }}]</button>
+            <p class="text-xs text-slate-400 mt-2">Exempt the whole Compose stack</p>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

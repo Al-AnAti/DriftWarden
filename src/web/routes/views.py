@@ -1,30 +1,126 @@
-from fastapi import APIRouter, Request, Depends
-from fastapi.templating import Jinja2Templates
+"""Server-rendered pages: Dashboard, Diff, Events Log, State Buffer, Cluster Config."""
+
 from pathlib import Path
-from sqlmodel import Session, select
-from src.web.db.session import get_session
-from src.web.db.models_db import TrackedOrphanModel, DriftLogModel
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+from shared.constants import DriftStatus
+from shared.models import DriftRecord
+from warden.engine.state_projector import snapshot_payload
+from web.runtime import WardenRuntime, get_runtime
 
 router = APIRouter(tags=["Web UI Views"])
 
-# تحديد مسار مجلد الـ templates
-templates_path = Path(__file__).parent.parent / "templates"
-templates = Jinja2Templates(directory=str(templates_path))
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-@router.get("/")
-def render_dashboard(request: Request, session: Session = Depends(get_session)):
-    """عرض صفحة لوحة التحكم وجلب عدد الحاويات المعزولة وسجلات الانحراف من قاعدة البيانات"""
-    # استعلام جلب عدد الحاويات المعزولة
-    orphans_count = len(session.exec(select(TrackedOrphanModel)).all())
-    
-    # استعلام جلب عدد الانحرافات الأمنية
-    drifts_count = len(session.exec(select(DriftLogModel)).all())
+STATUS_META: dict[str, dict[str, str]] = {
+    DriftStatus.MATCHED.value: {"label": "Matched", "tone": "emerald"},
+    DriftStatus.DRIFTED.value: {"label": "Drifted", "tone": "amber"},
+    DriftStatus.MISSING.value: {"label": "Missing", "tone": "sky"},
+    DriftStatus.ROGUE.value: {"label": "Rogue", "tone": "rose"},
+    DriftStatus.PENDING_ADOPTION.value: {"label": "Pending adoption", "tone": "violet"},
+}
+"""Display label and Tailwind colour family per status."""
 
-    return templates.TemplateResponse(
-        request, 
-        "dashboard.html", 
-        {
-            "orphans_count": orphans_count,
-            "drifts_count": drifts_count
-        }
-    )
+OVERALL_META: dict[str, dict[str, str]] = {
+    "in_sync": {"label": "IN SYNC", "tone": "emerald"},
+    "missing": {"label": "SERVICE MISSING", "tone": "sky"},
+    "drift_detected": {"label": "DRIFT DETECTED", "tone": "amber"},
+    "docker_unavailable": {"label": "DOCKER UNAVAILABLE", "tone": "rose"},
+    "baseline_unavailable": {"label": "BASELINE_UNAVAILABLE", "tone": "rose"},
+}
+"""Headline pill text and colour per overall status."""
+
+STATUS_ORDER = [
+    DriftStatus.ROGUE,
+    DriftStatus.DRIFTED,
+    DriftStatus.MISSING,
+    DriftStatus.PENDING_ADOPTION,
+    DriftStatus.MATCHED,
+]
+
+
+def base_context(request: Request, runtime: WardenRuntime, active: str) -> dict[str, Any]:
+    """Context every page needs: snapshot, settings summary and nav state."""
+    snapshot = runtime.projector.snapshot
+    return {
+        "request": request,
+        "active": active,
+        "snapshot": snapshot,
+        "snapshot_json": snapshot_payload(snapshot),
+        "counts": snapshot.counts(),
+        "overall": snapshot.overall,
+        "overall_meta": OVERALL_META,
+        "status_meta": STATUS_META,
+        "settings": runtime.settings,
+        "hostname": runtime.settings.hostname,
+        "mode": runtime.settings.warden_mode,
+        "enforcement_active": runtime.reconciler.enforcement_active,
+        "version": runtime.projector.version,
+    }
+
+
+def sorted_records(records: list[DriftRecord]) -> list[DriftRecord]:
+    """Problems first, then matched services, each group alphabetical."""
+    rank = {status: index for index, status in enumerate(STATUS_ORDER)}
+    return sorted(records, key=lambda r: (rank[r.drift_status], r.ref.lower()))
+
+
+@router.get("/", response_class=HTMLResponse)
+def dashboard(request: Request) -> HTMLResponse:
+    """Live host state with counters and the container table."""
+    runtime = get_runtime(request)
+    context = base_context(request, runtime, "dashboard")
+    context["records"] = sorted_records(runtime.projector.snapshot.records)
+    return templates.TemplateResponse(request, "dashboard.html", context)
+
+
+@router.get("/diff/{ref}", response_class=HTMLResponse)
+def diff_page(request: Request, ref: str) -> HTMLResponse:
+    """Side-by-side Git baseline versus live observed state for one entry."""
+    runtime = get_runtime(request)
+    record = runtime.projector.snapshot.find(ref)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"No container or service named '{ref}'")
+    context = base_context(request, runtime, "dashboard")
+    context["record"] = record
+    context["changed_fields"] = set(record.changed_fields)
+    return templates.TemplateResponse(request, "diff.html", context)
+
+
+@router.get("/events", response_class=HTMLResponse)
+def events_page(request: Request) -> HTMLResponse:
+    """Audit log and drift transitions."""
+    runtime = get_runtime(request)
+    context = base_context(request, runtime, "events")
+    context["audit"] = runtime.store.list_audit(limit=200)
+    context["events"] = runtime.store.list_drift_events(limit=200)
+    return templates.TemplateResponse(request, "events.html", context)
+
+
+@router.get("/buffer", response_class=HTMLResponse)
+def buffer_page(request: Request) -> HTMLResponse:
+    """Pending adoptions and their history."""
+    runtime = get_runtime(request)
+    context = base_context(request, runtime, "buffer")
+    context["active"] = "buffer"
+    context["pending"] = runtime.reconciler.pending
+    context["history"] = runtime.store.pending_history(limit=100)
+    return templates.TemplateResponse(request, "buffer.html", context)
+
+
+@router.get("/config", response_class=HTMLResponse)
+def config_page(request: Request) -> HTMLResponse:
+    """Effective configuration, baseline YAML, exclusions and whitelist."""
+    runtime = get_runtime(request)
+    context = base_context(request, runtime, "config")
+    context["whitelist"] = runtime.store.list_whitelist()
+    context["db_counts"] = runtime.store.counts()
+    context["baseline"] = runtime.projector.snapshot.baseline
+    context["excluded_prefixes"] = runtime.settings.excluded_prefixes
+    context["github_configured"] = runtime.settings.github_pat is not None
+    return templates.TemplateResponse(request, "config.html", context)

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Cluster Config &middot; DriftWarden{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <h1 class="text-2xl font-bold tracking-tight">Cluster Config</h1>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <header class="px-6 py-4 border-b border-slate-800"><h2 class="font-semibold">Effective settings</h2></header>
+            <dl class="divide-y divide-slate-800 text-sm">
+                {% set rows = [
+                    ("Host", hostname),
+                    ("Mode (WARDEN_MODE)", mode),
+                    ("Enforcement armed", "yes" if enforcement_active else "no"),
+                    ("Baseline source", baseline.source.value),
+                    ("Target repo", settings.target_repo or "—"),
+                    ("Target branch", settings.target_branch or "—"),
+                    ("Baseline file", settings.baseline_file_path),
+                    ("GitHub token", "configured" if github_configured else "missing"),
+                    ("Mock baseline", settings.mock_baseline_path if settings.allow_mock_baseline else "off"),
+                    ("Managed namespace", baseline.project_name or settings.compose_namespace or "—"),
+                    ("Baseline poll interval", settings.baseline_poll_interval_seconds ~ " s"),
+                    ("Event debounce", settings.drift_debounce_seconds ~ " s"),
+                    ("Sweep interval", settings.reconcile_sweep_interval_seconds ~ " s"),
+                    ("Enforcement grace", settings.enforcement_grace_seconds ~ " s"),
+                    ("Adoption buffer TTL", settings.adoption_buffer_ttl_seconds ~ " s"),
+                    ("Docker reconnect delay", settings.docker_event_reconnect_delay ~ " s"),
+                    ("Docker endpoint", settings.docker_base_url or ("unix://" ~ settings.docker_socket_path ~ " or DOCKER_HOST")),
+                    ("Database", settings.database_url),
+                    ("Excluded name prefixes", excluded_prefixes | join(", ")),
+                ] %}
+                {% for key, value in rows %}
+                <div class="px-6 py-2 flex justify-between gap-6">
+                    <dt class="text-slate-400">{{ key }}</dt>
+                    <dd class="font-mono text-slate-200 text-right break-all">{{ value }}</dd>
+                </div>
+                {% endfor %}
+            </dl>
+        </section>
+
+        <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
+            <header class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+                <h2 class="font-semibold">Baseline ({{ baseline.path or '—' }})</h2>
+                <span class="text-xs font-mono text-slate-500">{% if baseline.sha %}@{{ baseline.sha[:12] }}{% endif %} {% if baseline.fetched_at %}&middot; checked {{ baseline.fetched_at.strftime('%H:%M:%S') }} UTC{% endif %}</span>
+            </header>
+            {% if baseline.raw_yaml %}
+            <pre class="code-pane flex-grow">{{ baseline.raw_yaml }}</pre>
+            {% else %}
+            <div class="p-6 text-sm text-rose-300">No baseline loaded. {{ baseline.error or '' }}</div>
+            {% endif %}
+        </section>
+    </div>
+
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+            <div>
+                <h2 class="font-semibold">Whitelist ({{ whitelist | length }})</h2>
+                <p class="text-xs text-slate-500">Exempt containers and whole Compose projects are never diffed or enforced.</p>
+            </div>
+            <form onsubmit="return wardenWhitelistForm(event)" class="flex flex-wrap items-center gap-2 text-sm">
+                <select name="target_type" class="bg-slate-800 border border-slate-700 rounded px-2 py-1">
+                    <option value="CONTAINER">Container</option>
+                    <option value="PROJECT">Project</option>
+                </select>
+                <input name="target_identifier" required placeholder="name, id or project" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 font-mono">
+                <input name="reason" placeholder="reason" class="bg-slate-800 border border-slate-700 rounded px-2 py-1">
+                <button class="btn btn-emerald">Add</button>
+            </form>
+        </header>
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
+                <tr><th class="text-left px-6 py-2">Type</th><th class="text-left px-6 py-2">Identifier</th><th class="text-left px-6 py-2">Reason</th><th class="text-left px-6 py-2">Added (UTC)</th><th class="text-right px-6 py-2"></th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 text-xs">
+                {% for w in whitelist %}
+                <tr>
+                    <td class="px-6 py-2"><span class="badge tone-slate">{{ w.target_type.value }}</span></td>
+                    <td class="px-6 py-2 font-mono">{{ w.target_identifier }}</td>
+                    <td class="px-6 py-2 text-slate-400">{{ w.reason or '—' }}</td>
+                    <td class="px-6 py-2 font-mono text-slate-500">{{ w.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-6 py-2 text-right"><button onclick="wardenUnwhitelist({{ w.id }}, '{{ w.target_identifier }}')" class="btn btn-ghost">Remove</button></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No exemptions recorded.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        {% for key, label in [("audit", "Audit rows"), ("events", "Drift events"), ("pending", "Active buffer entries"), ("whitelist", "Whitelist entries")] %}
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <p class="text-xs uppercase tracking-wider text-slate-400">{{ label }}</p>
+            <p class="text-2xl font-bold mt-1">{{ db_counts[key] }}</p>
+        </div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}

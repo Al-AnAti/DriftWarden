@@ -165,8 +165,9 @@
 .modal-input:focus { outline: none; border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.3); }
 .modal-input.invalid { border-color: #f43f5e; }
 
-/* Engine event toasts (top-right), separate from action toasts (bottom-right). */
-#event-toasts .toast { min-width: 18rem; }
+/* Affected-workload rows inside the batch modal breathe a little. */
+.modal-list > div { padding: 5px 0; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+.modal-list > div:last-child { border-bottom: 0; }
 
 .modal-radio { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.6rem; border-radius: 0.5rem; border: 1px solid #334155; background: #1e293b; cursor: pointer; font-size: 0.85rem; text-transform: none; letter-spacing: normal; }
 .modal-radio:has(input:checked) { border-color: #818cf8; background: rgba(99, 102, 241, 0.15); }

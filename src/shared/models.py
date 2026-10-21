@@ -472,14 +472,14 @@ class BatchRequest(BaseModel):
     Attributes:
         operation: ``enforce`` (kill rogue, recreate drifted/missing) or ``adopt``
             (open pull requests: adopt rogue/drifted, delete missing).
-        scope: ``all``, ``rogue`` or ``drifted``.
+        scope: ``all``, ``rogue``, ``drifted`` or ``missing``.
         note: Optional note for adoption pull requests.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     operation: Literal["enforce", "adopt"]
-    scope: Literal["all", "rogue", "drifted"] = "all"
+    scope: Literal["all", "rogue", "drifted", "missing"] = "all"
     note: str | None = Field(default=None, max_length=1000)
 
 
@@ -490,6 +490,7 @@ class BatchResult(BaseModel):
         operation: What ran.
         scope: Which workloads were targeted.
         results: One result per targeted entry, in execution order.
+        pr_url: The consolidated pull request for an adopt batch, if one was opened.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -497,6 +498,7 @@ class BatchResult(BaseModel):
     operation: str = Field(min_length=1)
     scope: str = Field(min_length=1)
     results: list[ActionResult] = Field(default_factory=list)
+    pr_url: str | None = None
 
     @property
     def succeeded(self) -> int:

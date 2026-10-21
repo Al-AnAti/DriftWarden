@@ -23,7 +23,10 @@ from shared.exceptions import AdoptionError, ConfigurationError, GitBaselineFetc
 from warden.config import WardenSettings
 
 ADOPTION_BRANCH_PREFIX = "warden/adopt-"
-"""Prefix shared by every branch DriftWarden pushes for an adoption."""
+"""Prefix shared by every branch DriftWarden pushes for a single adoption."""
+
+BATCH_BRANCH_PREFIX = "warden/batch-adopt-"
+"""Prefix of the single branch an Adopt All batch pushes."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -272,6 +275,8 @@ class GitHubClient:
         mutate: Callable[[str], str],
         title: str,
         body: str,
+        branch_prefix: str = ADOPTION_BRANCH_PREFIX,
+        reuse_open: bool = True,
     ) -> AdoptionPullRequest:
         """Create a branch, commit the mutated baseline and open a pull request.
 
@@ -284,6 +289,9 @@ class GitHubClient:
             mutate: Callback that receives the latest file text and returns the new text.
             title: Pull request title.
             body: Pull request body (Markdown).
+            branch_prefix: Branch name prefix; batches use ``warden/batch-adopt-``.
+            reuse_open: Return an already-open PR for the same container instead of
+                opening another one.
 
         Returns:
             The opened pull request, or an already-open one for the same container.
@@ -291,14 +299,14 @@ class GitHubClient:
         Raises:
             AdoptionError: If any GitHub call fails.
         """
-        existing = self.find_open_adoption_pr(container_name)
+        existing = self.find_open_adoption_pr(container_name) if reuse_open else None
         if existing is not None:
             logger.info("Reusing open adoption PR #{} for {}", existing.number, container_name)
             return existing
 
         repo = self._repo()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        branch = f"{ADOPTION_BRANCH_PREFIX}{slugify(container_name)}-{stamp}"
+        branch = f"{branch_prefix}{slugify(container_name)}-{stamp}"
         try:
             base_sha = str(repo.get_branch(self.branch).commit.sha)
             repo.create_git_ref(f"refs/heads/{branch}", base_sha)

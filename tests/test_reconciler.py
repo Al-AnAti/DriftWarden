@@ -537,13 +537,25 @@ async def test_batch_enforce_and_adopt(
     try:
         result = await reconciler.batch(BatchRequest(operation="adopt", scope="rogue"))
         assert result.succeeded == 1 and result.failed == 0
-        assert github.pulls[-1]["service"] == "rogue-db"
+        assert github.pulls[-1]["service"] == "batch" and "rogue-db:" in (github.mutated or "")
 
         await asyncio.sleep(0.05)
         await reconciler.reconcile("test")  # rogue-db is buffered now and leaves the scope
-        result = await reconciler.batch(BatchRequest(operation="adopt", scope="all"))
+        result = await reconciler.batch(BatchRequest(operation="adopt", scope="all", note="bulk"))
         assert {r.target for r in result.results} == {"infrastructure-test-cache-1", "web"}
-        assert {p["service"] for p in github.pulls[1:]} == {"cache", "web"}
+        assert result.succeeded == 2 and result.pr_url == "https://github.test/pull/2"
+        assert len(github.pulls) == 2  # one consolidated PR for both workloads
+        batch_pr = github.pulls[1]
+        assert batch_pr["branch_prefix"] == "warden/batch-adopt-"
+        assert (
+            "- [ ] **sync** `cache`" in batch_pr["body"]
+            and "- [ ] **remove** `web`" in batch_pr["body"]
+        )
+        assert "bulk" in batch_pr["body"]
+        mutated = github.mutated or ""
+        assert "web:" not in mutated and "image: redis:latest" in mutated
+        assert {p.pr_number for p in reconciler.pending} == {1, 2}
+        assert sorted(p.kind for p in reconciler.pending if p.pr_number == 2) == ["adopt", "remove"]
 
         await asyncio.sleep(0.05)
         await reconciler.reconcile("test")  # cache is buffered now, nothing drifted in scope
@@ -626,3 +638,57 @@ async def test_settings_change_live_with_confirmation_and_persist(
         }
     finally:
         await reconciler2.stop()
+
+
+async def test_revoke_keeps_shared_batch_pr_until_last_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    fixture_yaml: str,
+    rogue_container: LiveContainer,
+    drifted_cache: LiveContainer,
+) -> None:
+    from shared.models import BatchRequest
+
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container, drifted_cache]
+    github = FakeGitHub(fixture_yaml)
+    reconciler, _ = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        result = await reconciler.batch(BatchRequest(operation="adopt", scope="rogue"))
+        assert result.succeeded == 1
+        result = await reconciler.batch(BatchRequest(operation="adopt", scope="drifted"))
+        assert result.succeeded == 1
+        assert len(github.pulls) == 2  # separate batches, separate PRs
+        entries = sorted(reconciler.pending, key=lambda p: p.id)
+        assert [p.pr_number for p in entries] == [1, 2]
+
+        # Make both entries share PR 2 to exercise the shared-PR rule.
+        shared = entries[0].model_copy(update={"pr_number": 2})
+        reconciler._pending[shared.container_id] = shared
+        first = await reconciler.revoke_adoption(shared.id)
+        assert "kept open" in first.message and github.closed == []
+        second = await reconciler.revoke_adoption(entries[1].id)
+        assert "closed" in second.message and [n for n, _ in github.closed] == [2]
+        await asyncio.sleep(0.05)
+        assert reconciler.pending == []
+
+        # Polling asks GitHub once per distinct PR even with several entries.
+        await reconciler.batch(BatchRequest(operation="adopt", scope="all"))
+        github.fetches = 0
+        calls = {"n": 0}
+        original = github.pull_state
+
+        def counting(number: int) -> str:
+            calls["n"] += 1
+            return original(number)
+
+        github.pull_state = counting  # type: ignore[method-assign]
+        await reconciler.poll_pull_requests()
+        assert calls["n"] == 1 and len(reconciler.pending) == 3
+    finally:
+        await reconciler.stop()

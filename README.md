@@ -120,7 +120,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `GET /api/state`, `GET /api/state/stream` | Snapshot JSON and the SSE stream. |
 | `POST /api/actions/revert/{ref}`, `/kill/{ref}`, `/adopt/{ref}`, `/adopt-deletion/{ref}` | Operator actions (same code path as enforce mode); adopt-deletion opens a PR removing a MISSING service. |
 | `GET/POST /api/whitelist`, `DELETE /api/whitelist/{id}` | Exemptions. |
-| `POST /api/actions/batch` | Enforce All / Adopt All over a scope (`all`, `rogue`, `drifted`). |
+| `POST /api/actions/batch` | Enforce All / Adopt All over a scope (`all`, `rogue`, `drifted`, `missing`); Adopt All opens one consolidated pull request on a `warden/batch-adopt-*` branch. |
 | `GET/PUT /api/settings` | Read and change runtime settings. |
 | `POST /api/buffer/{id}/revoke` | Close the adoption pull request and drop the entry from the buffer. |
 | `GET /api/audit`, `/api/events`, `/api/buffer`, `/api/health`, `POST /api/reconcile` | Data and a manual refresh. |

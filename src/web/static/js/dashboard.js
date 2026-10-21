@@ -28,7 +28,6 @@
     }
 
     function toast(message, tone) { toastInto("toasts", message, tone); }
-    function eventToast(message, tone) { toastInto("event-toasts", message, tone, 8000); }
 
     /* Queue a toast to be shown on the next page (used around redirects). */
     function flash(message, tone) {
@@ -375,22 +374,6 @@
         }
     }
 
-    const TRANSITION_TONE = { rogue: "rose", drifted: "amber", missing: "sky", pending_adoption: "violet", matched: "emerald" };
-
-    function announceTransitions(payload) {
-        const transitions = payload.transitions || [];
-        transitions.slice(0, 5).forEach((t) => {
-            const label = (W.statusMeta[t.status] || { label: t.status }).label;
-            const from = t.previous ? " (was " + (W.statusMeta[t.previous] || { label: t.previous }).label.toLowerCase() + ")" : "";
-            eventToast(label.toUpperCase() + ": " + t.display_name + from, TRANSITION_TONE[t.status] || "slate");
-        });
-        if (transitions.length > 5) eventToast("+" + (transitions.length - 5) + " more changes", "slate");
-        const trigger = payload.snapshot.trigger;
-        if (!transitions.length && (trigger === "manual" || trigger === "post-enforce" || trigger === "batch")) {
-            eventToast("Reconcile via " + trigger + " completed: " + payload.snapshot.overall.replace(/_/g, " "), "slate");
-        }
-    }
-
     function apply(payload, announce) {
         const snapshot = payload.snapshot;
         const previousOverall = W.snapshot ? W.snapshot.overall : null;
@@ -399,10 +382,8 @@
         renderChrome(snapshot);
         if (W.page === "dashboard") renderDashboard(snapshot);
         renderDiffPage(snapshot);
-        if (announce) {
-            announceTransitions(payload);
-            chimeForTransition(previousOverall, snapshot.overall);
-        }
+        /* Engine events are not toasted (visual clutter); the status pill and the chimes carry them. */
+        if (announce) chimeForTransition(previousOverall, snapshot.overall);
     }
 
     /* --------------------------------------------------------------- SSE */
@@ -508,9 +489,10 @@
     /* ------------------------------------------------------ batch actions */
 
     const SCOPES = [
-        { value: "all", label: "All workloads", statuses: ["rogue", "drifted", "missing"] },
+        { value: "all", label: "All workloads", statuses: ["rogue", "drifted", "missing"], always: true },
         { value: "rogue", label: "Only rogue containers", statuses: ["rogue"] },
         { value: "drifted", label: "Only drifted containers", statuses: ["drifted"] },
+        { value: "missing", label: "Only missing containers", statuses: ["missing"] },
     ];
 
     function affectedFor(scope) {
@@ -520,7 +502,9 @@
     }
 
     function batchBodyHtml(operation) {
-        const radios = SCOPES.map((s, index) =>
+        /* Only scopes that currently have matching workloads are offered; "All workloads" always is. */
+        const visible = SCOPES.filter((s) => s.always || affectedFor(s.value).length > 0);
+        const radios = visible.map((s, index) =>
             '<label class="modal-radio"><input type="radio" name="scope" value="' + s.value + '"' + (index === 0 ? " checked" : "") + "> " + esc(s.label) +
             ' <span class="ml-auto text-xs text-slate-400" data-scope-count="' + s.value + '">' + affectedFor(s.value).length + "</span></label>"
         ).join("");
@@ -574,7 +558,8 @@
         try {
             const result = await post("/api/actions/batch", { operation, scope, note: values.note || null });
             const failed = result.results.filter((r) => !r.ok);
-            toast((isEnforce ? "Enforce All" : "Adopt All") + ": " + result.succeeded + " succeeded, " + result.failed + " failed", failed.length ? "amber" : "emerald");
+            const prNote = result.pr_url ? " in one pull request" : "";
+            toast((isEnforce ? "Enforce All" : "Adopt All") + ": " + result.succeeded + " succeeded, " + result.failed + " failed" + prNote, failed.length ? "amber" : "emerald");
             failed.slice(0, 3).forEach((r) => toast(r.target + ": " + r.message, "rose"));
         } catch (err) {
             toast("Batch failed: " + err.message, "rose");
@@ -700,6 +685,17 @@
             window.location.reload();
         } catch (err) {
             toast("Revoke failed: " + err.message, "rose");
+        }
+    };
+
+    /* Events Log: same Refresh button as the dashboard, then reload the server-rendered tables. */
+    window.wardenRefreshPage = async function () {
+        toast("Refreshing…", "sky");
+        try {
+            await post("/api/reconcile");
+            window.location.reload();
+        } catch (err) {
+            toast("Refresh failed: " + err.message, "rose");
         }
     };
 

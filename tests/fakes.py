@@ -147,13 +147,21 @@ class FakeGitHub:
         mutate: Callable[[str], str],
         title: str,
         body: str,
+        branch_prefix: str = "warden/adopt-",
+        reuse_open: bool = True,
     ) -> AdoptionPullRequest:
         self.mutated = mutate(self.content)
         self.pulls.append(
-            {"container": container_name, "service": service_name, "title": title, "body": body}
+            {
+                "container": container_name,
+                "service": service_name,
+                "title": title,
+                "body": body,
+                "branch_prefix": branch_prefix,
+            }
         )
         return AdoptionPullRequest(
             number=len(self.pulls),
             url=f"https://github.test/pull/{len(self.pulls)}",
-            branch="warden/adopt-x",
+            branch=f"{branch_prefix}x",
         )

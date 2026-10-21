@@ -12,6 +12,7 @@ import hashlib
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,7 +51,11 @@ from shared.models import (
     WhitelistEntry,
     WhitelistRequest,
 )
-from warden.automation.github_client import AdoptionPullRequest, GitHubClient
+from warden.automation.github_client import (
+    BATCH_BRANCH_PREFIX,
+    AdoptionPullRequest,
+    GitHubClient,
+)
 from warden.automation.yaml_mutator import (
     AdoptionSpec,
     add_service,
@@ -77,6 +82,26 @@ ACTION_CACHE_TTL_SECONDS = 20.0
 
 ENFORCEMENT_COOLDOWN_SECONDS = 60.0
 """Minimum time between two autonomous actions on the same entry (loop guard)."""
+
+
+@dataclass(slots=True)
+class AdoptionPlan:
+    """Everything needed to write one rogue or drifted container into the baseline.
+
+    Attributes:
+        record: The dashboard entry being adopted.
+        container: Freshly inspected live container.
+        spec: What the mutator writes.
+        is_update: ``True`` for a drifted service (fields synced), ``False`` for a new one.
+        changed_fields: Fields to sync when ``is_update``.
+    """
+
+    record: DriftRecord
+    container: LiveContainer
+    spec: AdoptionSpec
+    is_update: bool
+    changed_fields: list[str]
+
 
 AUTONOMOUS_CONFIRMATION = "ENABLE AUTONOMOUS"
 """Phrase an operator must type to switch WARDEN_MODE to enforce at runtime."""
@@ -404,13 +429,20 @@ class Reconciler:
         if self.github is None or not self._pending:
             return
         merged = False
+        states: dict[int, str | None] = {}  # one GitHub call per distinct pull request
         for pending in list(self._pending.values()):
             if pending.pr_number is None:
                 continue
-            try:
-                state = await asyncio.to_thread(self.github.pull_state, pending.pr_number)
-            except GitBaselineFetchError as exc:
-                logger.warning("Cannot check PR #{}: {}", pending.pr_number, exc)
+            if pending.pr_number not in states:
+                try:
+                    states[pending.pr_number] = await asyncio.to_thread(
+                        self.github.pull_state, pending.pr_number
+                    )
+                except GitBaselineFetchError as exc:
+                    logger.warning("Cannot check PR #{}: {}", pending.pr_number, exc)
+                    states[pending.pr_number] = None
+            state = states[pending.pr_number]
+            if state is None:
                 self._pr_unreachable_since.setdefault(pending.id, time.monotonic())
                 continue
             self._pr_unreachable_since.pop(pending.id, None)
@@ -790,36 +822,11 @@ class Reconciler:
                 f"'{ref}' is {record.drift_status.value}; "
                 "only rogue or drifted containers can be adopted"
             )
-        if self.github is None or self.settings.allow_mock_baseline:
-            raise AdoptionError("Adoption needs GitHub; ALLOW_MOCK_BASELINE is enabled")
-        if self.baseline is None or not record.container_id:
-            raise AdoptionError("No baseline or container available for adoption")
-        container = await asyncio.to_thread(self.watcher.inspect, record.container_id)
-        if container is None:
-            raise AdoptionError(f"Container {record.ref} disappeared before adoption")
-
-        project = self.baseline.project_name
-        service_name = record.service_name or sanitise_service_name(container.name, project)
-        observed = observed_service(container, service_name, project, self._context())
-        stripped = project_networks(container, project)
-        external = {
-            name: name
-            for name in stripped
-            if name not in ("default", "bridge", "host", "none") and name in container.networks
-        }
-        spec = AdoptionSpec(
-            service_name=service_name,
-            image=container.image,
-            container_name=None,  # never pin a generated container name in Git
-            ports=observed.ports,
-            networks=[n for n in observed.networks if n not in ("bridge", "host", "none")],
-            external_networks=external,
-            labels=observed.labels,
-            restart=observed.restart,
-            environment_keys=list(observed.environment),
-        )
-        changed_fields = record.changed_fields
-        is_update = record.drift_status is DriftStatus.DRIFTED
+        plan = await self._plan_adoption(record)
+        container, spec = plan.container, plan.spec
+        service_name = spec.service_name
+        changed_fields = plan.changed_fields
+        is_update = plan.is_update
         final_name = service_name
 
         def mutate(latest: str) -> str:
@@ -842,9 +849,12 @@ class Reconciler:
             else f"warden: sync {service_name} with live container {container.name}"
         )
         body = _pr_body(record, container, spec, note, self.settings.hostname, is_update)
+        github = self.github
+        if github is None:
+            raise AdoptionError("Adoption needs GitHub; ALLOW_MOCK_BASELINE is enabled")
         try:
             pull: AdoptionPullRequest = await asyncio.to_thread(
-                self.github.open_adoption_pr,
+                github.open_adoption_pr,
                 container_name=container.name,
                 service_name=service_name,
                 mutate=mutate,
@@ -882,6 +892,185 @@ class Reconciler:
             message=f"{verb} pull request #{pull.number} adding {final_name} to the baseline.",
             pr_url=pull.url,
         )
+
+    async def _plan_adoption(self, record: DriftRecord) -> AdoptionPlan:
+        """Inspect a rogue or drifted container and decide what to write to Git."""
+        if self.github is None or self.settings.allow_mock_baseline:
+            raise AdoptionError("Adoption needs GitHub; ALLOW_MOCK_BASELINE is enabled")
+        if self.baseline is None or not record.container_id:
+            raise AdoptionError("No baseline or container available for adoption")
+        container = await asyncio.to_thread(self.watcher.inspect, record.container_id)
+        if container is None:
+            raise AdoptionError(f"Container {record.ref} disappeared before adoption")
+        project = self.baseline.project_name
+        service_name = record.service_name or sanitise_service_name(container.name, project)
+        observed = observed_service(container, service_name, project, self._context())
+        stripped = project_networks(container, project)
+        external = {
+            name: name
+            for name in stripped
+            if name not in ("default", "bridge", "host", "none") and name in container.networks
+        }
+        spec = AdoptionSpec(
+            service_name=service_name,
+            image=container.image,
+            container_name=None,  # never pin a generated container name in Git
+            ports=observed.ports,
+            networks=[n for n in observed.networks if n not in ("bridge", "host", "none")],
+            external_networks=external,
+            labels=observed.labels,
+            restart=observed.restart,
+            environment_keys=list(observed.environment),
+        )
+        return AdoptionPlan(
+            record=record,
+            container=container,
+            spec=spec,
+            is_update=record.drift_status is DriftStatus.DRIFTED,
+            changed_fields=record.changed_fields,
+        )
+
+    async def adopt_all(self, targets: list[DriftRecord], note: str | None) -> BatchResult:
+        """Adopt every target through one branch and one consolidated pull request.
+
+        Rogue containers become new services, drifted services get their changed
+        fields synced and missing services are removed, all in a single YAML
+        mutation so the branches cannot collide or conflict with each other.
+        """
+        results: list[ActionResult] = []
+        if self.github is None or self.settings.allow_mock_baseline:
+            why = "Adoption needs GitHub; ALLOW_MOCK_BASELINE is enabled"
+            results = [
+                ActionResult(ok=False, action="adopt", target=r.ref, message=why) for r in targets
+            ]
+            return BatchResult(operation="adopt", scope="batch", results=results)
+        github = self.github
+        plans: list[AdoptionPlan] = []
+        removals: list[DriftRecord] = []
+        for record in targets:
+            try:
+                if record.drift_status is DriftStatus.MISSING:
+                    if record.service_name is None:
+                        raise AdoptionError(f"'{record.ref}' has no service to remove")
+                    removals.append(record)
+                else:
+                    plans.append(await self._plan_adoption(record))
+            except DriftWardenError as exc:
+                results.append(
+                    ActionResult(ok=False, action="adopt", target=record.ref, message=str(exc))
+                )
+        if not plans and not removals:
+            return BatchResult(operation="adopt", scope="batch", results=results)
+
+        final_names: dict[str, str] = {}
+
+        def mutate(latest: str) -> str:
+            text = latest
+            try:
+                for plan in plans:
+                    if plan.is_update:
+                        text, name = update_service(text, plan.spec, plan.changed_fields)
+                    else:
+                        text, name = add_service(text, plan.spec)
+                    final_names[plan.record.ref] = name
+                for record in removals:
+                    text = remove_service(text, record.service_name or "")
+            except YAMLMutationError as exc:
+                raise AdoptionError(str(exc)) from exc
+            return text
+
+        for record in [p.record for p in plans] + removals:
+            await asyncio.to_thread(
+                self.store.record_audit, AuditAction.ADOPT_REQUESTED, record.ref, note or "batch"
+            )
+        count = len(plans) + len(removals)
+        plural = "s" if count != 1 else ""
+        title = f"warden: batch adopt {count} workload{plural} from {self.settings.hostname}"
+        body = _batch_pr_body(plans, removals, note, self.settings.hostname)
+        try:
+            pull = await asyncio.to_thread(
+                github.open_adoption_pr,
+                container_name="batch",
+                service_name="batch",
+                mutate=mutate,
+                title=title,
+                body=body,
+                branch_prefix=BATCH_BRANCH_PREFIX,
+                reuse_open=False,
+            )
+        except AdoptionError as exc:
+            for record in [p.record for p in plans] + removals:
+                await asyncio.to_thread(
+                    self.store.record_audit, AuditAction.ADOPT_FAILED, record.ref, str(exc)
+                )
+                results.append(
+                    ActionResult(ok=False, action="adopt", target=record.ref, message=str(exc))
+                )
+            return BatchResult(operation="adopt", scope="batch", results=results)
+
+        for plan in plans:
+            service = final_names.get(plan.record.ref, plan.spec.service_name)
+            pending = await asyncio.to_thread(
+                self.store.add_pending,
+                container_id=plan.container.id,
+                container_name=plan.container.name,
+                service_name=service,
+                ttl_seconds=self.settings.adoption_buffer_ttl_seconds,
+                pr_number=pull.number,
+                pr_url=pull.url,
+                branch=pull.branch,
+            )
+            self._pending[plan.container.id] = pending
+            await asyncio.to_thread(
+                self.store.record_audit,
+                AuditAction.ADOPT_PR_OPENED,
+                plan.record.ref,
+                f"batch PR #{pull.number} {pull.url}",
+            )
+            results.append(
+                ActionResult(
+                    ok=True,
+                    action="adopt",
+                    target=plan.record.ref,
+                    message=(
+                        f"{'Synced' if plan.is_update else 'Added'} {service} "
+                        f"in batch PR #{pull.number}."
+                    ),
+                    pr_url=pull.url,
+                )
+            )
+        for record in removals:
+            service = record.service_name or record.ref
+            key = f"{PENDING_REMOVAL_PREFIX}{service}"
+            pending = await asyncio.to_thread(
+                self.store.add_pending,
+                container_id=key,
+                container_name=service,
+                service_name=service,
+                ttl_seconds=self.settings.adoption_buffer_ttl_seconds,
+                pr_number=pull.number,
+                pr_url=pull.url,
+                branch=pull.branch,
+                kind="remove",
+            )
+            self._pending[key] = pending
+            await asyncio.to_thread(
+                self.store.record_audit,
+                AuditAction.ADOPT_PR_OPENED,
+                record.ref,
+                f"batch deletion PR #{pull.number} {pull.url}",
+            )
+            results.append(
+                ActionResult(
+                    ok=True,
+                    action="adopt_deletion",
+                    target=record.ref,
+                    message=f"Removed {service} in batch PR #{pull.number}.",
+                    pr_url=pull.url,
+                )
+            )
+        self.schedule_reconcile("batch-adopt")
+        return BatchResult(operation="adopt", scope="batch", results=results, pr_url=pull.url)
 
     async def adopt_deletion(self, ref: str, note: str | None = None) -> ActionResult:
         """Open a pull request that removes a MISSING service from the baseline."""
@@ -973,8 +1162,13 @@ class Reconciler:
         if pending is None:
             raise DriftWardenError(f"No active buffer entry with id {entry_id}")
         note = "Adoption cancelled by the operator from DriftWarden; closing without merging."
+        sharing = [
+            p
+            for p in self._pending.values()
+            if p.id != pending.id and p.pr_number == pending.pr_number
+        ]
         closed = False
-        if self.github is not None and pending.pr_number is not None:
+        if self.github is not None and pending.pr_number is not None and not sharing:
             try:
                 await asyncio.to_thread(self.github.close_pull, pending.pr_number, note)
                 closed = True
@@ -983,9 +1177,15 @@ class Reconciler:
         await asyncio.to_thread(self.store.clear_pending, pending.id, "revoked")
         self._pending.pop(pending.container_id, None)
         self._pr_unreachable_since.pop(pending.id, None)
-        detail = (
-            f"PR #{pending.pr_number} closed" if closed else f"PR #{pending.pr_number} left as is"
-        )
+        if sharing:
+            detail = (
+                f"PR #{pending.pr_number} kept open: {len(sharing)} other buffered "
+                f"{'entry' if len(sharing) == 1 else 'entries'} still depend on it"
+            )
+        elif closed:
+            detail = f"PR #{pending.pr_number} closed"
+        else:
+            detail = f"PR #{pending.pr_number} left as is"
         await asyncio.to_thread(
             self.store.record_audit, AuditAction.ADOPTION_REVOKED, pending.container_name, detail
         )
@@ -1007,6 +1207,7 @@ class Reconciler:
             "all": {DriftStatus.ROGUE, DriftStatus.DRIFTED, DriftStatus.MISSING},
             "rogue": {DriftStatus.ROGUE},
             "drifted": {DriftStatus.DRIFTED},
+            "missing": {DriftStatus.MISSING},
         }[request.scope]
         targets = [r for r in self.projector.snapshot.records if r.drift_status in wanted]
         await asyncio.to_thread(
@@ -1015,18 +1216,16 @@ class Reconciler:
             f"{request.operation}:{request.scope}",
             ", ".join(r.ref for r in targets) or "nothing in scope",
         )
+        if request.operation == "adopt":
+            outcome = await self.adopt_all(targets, request.note)
+            return outcome.model_copy(update={"scope": request.scope})
         results: list[ActionResult] = []
         for record in targets:
             try:
-                if request.operation == "enforce":
-                    if record.drift_status is DriftStatus.ROGUE:
-                        result = await self._kill_record(record, autonomous=False)
-                    else:
-                        result = await self._revert_record(record, autonomous=False)
-                elif record.drift_status is DriftStatus.MISSING:
-                    result = await self.adopt_deletion(record.ref, request.note)
+                if record.drift_status is DriftStatus.ROGUE:
+                    result = await self._kill_record(record, autonomous=False)
                 else:
-                    result = await self.adopt(record.ref, request.note)
+                    result = await self._revert_record(record, autonomous=False)
             except DriftWardenError as exc:
                 result = ActionResult(
                     ok=False, action=request.operation, target=record.ref, message=str(exc)
@@ -1147,6 +1346,48 @@ class Reconciler:
     def pending(self) -> list[PendingAdoption]:
         """Active adoption buffer entries."""
         return list(self._pending.values())
+
+
+def _batch_pr_body(
+    plans: list[AdoptionPlan], removals: list[DriftRecord], note: str | None, hostname: str
+) -> str:
+    """Compose the Markdown body of a consolidated Adopt All pull request."""
+    lines = [
+        "## DriftWarden Reverse-GitOps batch adoption",
+        "",
+        f"**Host:** `{hostname}`  ",
+        f"**Workloads:** {len(plans) + len(removals)}",
+        "",
+        "### Checklist",
+        "",
+    ]
+    for plan in plans:
+        if plan.is_update:
+            fields = ", ".join(plan.changed_fields) or "no fields"
+            lines.append(
+                f"- [ ] **sync** `{plan.spec.service_name}` from `{plan.container.name}` ({fields})"
+            )
+        else:
+            lines.append(
+                f"- [ ] **add** `{plan.spec.service_name}` from rogue container "
+                f"`{plan.container.name}` (`{plan.container.image}`)"
+            )
+    for record in removals:
+        lines.append(f"- [ ] **remove** `{record.service_name}` (missing on the host)")
+    keys = sorted({key for plan in plans for key in plan.spec.environment_keys})
+    if keys:
+        lines += [
+            "",
+            "### Environment",
+            "",
+            "Values were **not** committed; these keys are written as `${KEY}` placeholders:",
+            "",
+        ]
+        lines += [f"- `{key}`" for key in keys]
+    if note:
+        lines += ["", "### Operator note", "", note]
+    lines += ["", "---", "_Generated by DriftWarden from the live Docker socket state._"]
+    return "\n".join(lines)
 
 
 def _pr_body(

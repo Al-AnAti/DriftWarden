@@ -215,3 +215,18 @@ def test_sse_payload_carries_transitions(client: TestClient, fake_watcher: FakeW
     projector.unsubscribe(queue)
     assert message["transitions"] == [] or all("status" in t for t in message["transitions"])
     assert message["snapshot"]["counts"]["rogue"] == 0
+
+
+def test_batch_missing_scope_and_consolidated_adopt_refused_without_github(
+    client: TestClient, fake_watcher: FakeWatcher
+) -> None:
+    fake_watcher.containers = [c for c in fake_watcher.containers if "cache" not in c.name]
+    client.post("/api/reconcile")
+    response = client.post("/api/actions/batch", json={"operation": "adopt", "scope": "missing"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["failed"] == 1 and "GitHub" in body["results"][0]["message"]
+    assert body["pr_url"] is None
+    page = client.get("/").text
+    assert "🔄 Refresh" in page and "event-toasts" not in page
+    assert "🔄 Refresh" in client.get("/events").text

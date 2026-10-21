@@ -15,7 +15,7 @@ endif
 
 export PYTHONPATH = src
 
-.PHONY: install install-dev format lint typecheck test coverage start check clean demo-infra-up demo-drift demo-clean
+.PHONY: install install-dev format lint typecheck test coverage start check clean demo-up demo-drift demo-down
 
 # ------------------------------------------
 # Setup & Dependency Management
@@ -76,11 +76,11 @@ clean:
 # Final Presentation Demo Runners
 # ------------------------------------------
 
-demo-infra-up:
+demo-up:
 	$(BASH_CMD) scripts/demo.sh infra-up
 
 demo-drift:
 	$(BASH_CMD) scripts/demo.sh drift
 
-demo-clean:
+demo-down:
 	$(BASH_CMD) scripts/demo.sh clean

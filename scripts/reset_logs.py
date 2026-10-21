@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from loguru import logger  # noqa: E402  (needs src on sys.path)
+
 from web.db.repository import Store  # noqa: E402
 from web.db.session import Database  # noqa: E402
 

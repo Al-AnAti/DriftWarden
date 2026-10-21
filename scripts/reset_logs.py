@@ -19,10 +19,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from web.db.repository import Store  # noqa: E402  (needs src on sys.path)
+from loguru import logger  # noqa: E402  (needs src on sys.path)
+from web.db.repository import Store  # noqa: E402
 from web.db.session import Database  # noqa: E402
 
 DEFAULT_DATABASE_URL = "sqlite:///./warden.db"
+
+
+def _utf8_stdout() -> None:
+    """Make sure the check mark prints on consoles that default to a legacy code page."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
 
 
 def resolve_database_url() -> str:
@@ -56,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = list(sys.argv[1:] if argv is None else argv)
     url = args[0] if args else resolve_database_url()
+    _utf8_stdout()
+    logger.remove()
+    logger.add(sys.stderr, level="WARNING")
     database = Database(url)
     try:
         database.init()

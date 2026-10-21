@@ -73,8 +73,7 @@ clean:
 	$(BASH_CMD) scripts/clean.sh
 
 reset-logs:
-	python -c "import sqlite3; c = sqlite3.connect('warden.db'); c.execute('DELETE FROM drift_events'); c.execute('DELETE FROM audit_log'); c.commit(); c.close()"
-	@echo "Audit and drift log history cleared."
+	python scripts/reset_logs.py
 
 # ------------------------------------------
 # Final Presentation Demo Runners

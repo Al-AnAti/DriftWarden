@@ -122,7 +122,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `GET/POST /api/whitelist`, `DELETE /api/whitelist/{id}` | Exemptions. |
 | `POST /api/actions/batch` | Enforce All / Adopt All over a scope (`all`, `rogue`, `drifted`, `missing`); Adopt All opens one consolidated pull request on a `warden/batch-adopt-*` branch. |
 | `GET/PUT /api/settings` | Read and change runtime settings. |
-| `POST /api/buffer/{id}/revoke` | Close the adoption pull request and drop the entry from the buffer. |
+| `POST /api/buffer/{id}/revoke` | Close the adoption pull request and evict every buffer entry that shares it. |
 | `GET /api/audit`, `/api/events`, `/api/buffer`, `/api/health`, `POST /api/reconcile` | Data and a manual refresh. |
 
 ## 🛠️ Development workflow
@@ -131,6 +131,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 * `make check` runs `ruff format --check`, `ruff check`, `mypy src/` (strict) and `pytest`. Run it before every commit.
 * `make format`, `make lint`, `make typecheck`, `make test` run the individual tools.
 * `make clean` wipes caches.
+* `make reset-logs` runs `scripts/reset_logs.py`, which truncates the `drift_events` and `audit_log` tables in one transaction through the project's own engine.
 
 Conventions: Python 3.10 syntax floor, `X | None` unions, Pydantic at every boundary and dataclasses inside the engine, Loguru only, `ruamel.yaml` round-trip only, PyGithub only (no subprocess git), no SPA frameworks.
 

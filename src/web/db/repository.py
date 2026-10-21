@@ -352,6 +352,26 @@ class Store:
         except Exception as exc:
             raise DatabaseWriteError(f"Cannot delete setting {key}: {exc}") from exc
 
+    def clear_logs(self) -> tuple[int, int]:
+        """Truncate the drift event and audit log tables in one transaction.
+
+        Returns:
+            ``(drift events removed, audit rows removed)``.
+
+        Raises:
+            DatabaseWriteError: If the transaction fails; nothing is removed then.
+        """
+        try:
+            with self._db.write() as session:
+                events = session.scalar(select(func.count(DriftEventRow.id))) or 0
+                audit = session.scalar(select(func.count(AuditLogRow.id))) or 0
+                session.execute(delete(DriftEventRow))
+                session.execute(delete(AuditLogRow))
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot clear log history: {exc}") from exc
+        logger.info("Cleared log history: {} drift events, {} audit rows", events, audit)
+        return events, audit
+
     def counts(self) -> dict[str, int]:
         """Row counts for the Cluster Config page."""
         with self._db.session() as session:

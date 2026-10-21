@@ -57,8 +57,7 @@
         <span class="block mt-1 text-slate-600" id="footer-updated">snapshot {{ snapshot.taken_at.strftime('%H:%M:%S') }} UTC via {{ snapshot.trigger }}</span>
     </footer>
 
-    <!-- Engine events pushed over SSE land top-right; action results land bottom-right. -->
-    <div id="event-toasts" class="fixed top-20 right-5 space-y-2 z-30"></div>
+    <!-- Action results land bottom-right; engine events only move the status pill and chimes. -->
     <div id="toasts" class="fixed bottom-5 right-5 space-y-2 z-30"></div>
 
     <!-- Reusable dark modal; driven by wardenModal() in dashboard.js -->

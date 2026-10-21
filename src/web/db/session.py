@@ -36,9 +36,24 @@ class Database:
         self.write_lock = threading.RLock()
 
     def init(self) -> None:
-        """Create every table that does not exist yet."""
+        """Create every table that does not exist yet and apply additive migrations."""
         Base.metadata.create_all(self.engine)
+        self._migrate()
         logger.info("Database ready at {}", self.url)
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a table was first created."""
+        if not self.url.startswith("sqlite"):
+            return
+        with self.engine.begin() as connection:
+            rows = connection.exec_driver_sql("PRAGMA table_info(pending_adoptions)").fetchall()
+            columns = {str(row[1]) for row in rows}
+            if columns and "kind" not in columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE pending_adoptions "
+                    "ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'adopt'"
+                )
+                logger.info("Migrated pending_adoptions: added kind column")
 
     @contextmanager
     def session(self) -> Iterator[Session]:

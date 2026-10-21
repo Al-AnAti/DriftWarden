@@ -51,7 +51,7 @@ def test_demo_scenario(
     result = evaluate([drifted_cache, rogue_container], context(baseline))
     by_ref = {r.ref: r for r in result.records}
     assert by_ref["web"].drift_status is DriftStatus.MISSING
-    assert by_ref["web"].actions == ["revert"]
+    assert by_ref["web"].actions == ["revert", "adopt_deletion"]
     assert by_ref["web"].status == "absent"
     cache = by_ref[f"{PROJECT}-cache-1"]
     assert cache.drift_status is DriftStatus.DRIFTED
@@ -130,7 +130,8 @@ def test_stopped_is_missing_and_paused_is_drifted(
     result = evaluate([web_container, cache_container], context(baseline))
     by_ref = {r.ref: r for r in result.records}
     web = by_ref[f"{PROJECT}-web-1"]
-    assert web.drift_status is DriftStatus.MISSING and web.actions == ["revert", "kill"]
+    assert web.drift_status is DriftStatus.MISSING
+    assert web.actions == ["revert", "adopt_deletion"]
     cache = by_ref[f"{PROJECT}-cache-1"]
     assert cache.drift_status is DriftStatus.DRIFTED and cache.changed_fields == ["state"]
 
@@ -272,8 +273,49 @@ def test_observed_service_strips_image_defaults(
     rogue_container.labels["maintainer"] = "x"
     rogue_container.labels["team"] = "db"
     observed = observed_service(rogue_container, "rogue-db", PROJECT, ctx)
-    assert observed.environment == {"MARIADB_ROOT_PASSWORD": "rogue"}
+    assert observed.environment == {"MARIADB_ROOT_PASSWORD": "${MARIADB_ROOT_PASSWORD}"}
     assert observed.labels == {"team": "db"}
-    assert observed.volumes == [":/var/lib/mysql:rw"]
-    assert observed.networks == ["bridge"]
+    assert observed.volumes == []  # anonymous image volumes are never reconstructed
+    assert observed.networks == []  # the implicit bridge network is never reconstructed
+    assert observed.container_name is None
     assert observed.restart is None
+
+
+def test_pending_deletion_marks_missing_service(baseline: Baseline) -> None:
+    now = datetime.now(timezone.utc)
+    removal = PendingAdoption(
+        id=3,
+        kind="remove",
+        container_id="service:web",
+        container_name="web",
+        service_name="web",
+        pr_number=9,
+        pr_url="https://x/9",
+        branch="b",
+        created_at=now,
+        expires_at=now + timedelta(minutes=3),
+    )
+    result = evaluate([], context(baseline, pending={"service:web": removal}))
+    by_ref = {r.ref: r for r in result.records}
+    assert by_ref["web"].drift_status is DriftStatus.PENDING_ADOPTION
+    assert by_ref["web"].actions == [] and by_ref["web"].pending_adoption == removal
+    assert by_ref["cache"].drift_status is DriftStatus.MISSING
+
+
+def test_observed_yaml_keeps_sibling_keys_at_service_level(
+    baseline: Baseline, rogue_container: LiveContainer
+) -> None:
+    rogue_container.labels["team"] = "db"
+    rogue_container.restart = "always"
+    result = evaluate([rogue_container], context(baseline))
+    record = next(r for r in result.records if r.ref == "rogue-db")
+    text = record.observed_yaml or ""
+    lines = text.splitlines()
+    assert lines[0] == "rogue-db:"
+    keys = [
+        ln.split(":")[0] for ln in lines[1:] if ln.startswith("  ") and not ln.startswith("   ")
+    ]
+    assert keys == ["  image", "  ports", "  environment", "  labels", "  restart"]
+    assert "container_name" not in text
+    assert "rogue" not in text.split("MARIADB_ROOT_PASSWORD")[1].splitlines()[0]
+    assert "/var/lib/mysql" not in text and "bridge" not in text

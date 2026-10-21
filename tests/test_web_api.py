@@ -108,6 +108,22 @@ def test_actions(client: TestClient, fake_watcher: FakeWatcher) -> None:
 def test_adopt_refused_with_mock_baseline(client: TestClient) -> None:
     response = client.post("/api/actions/adopt/rogue-db")
     assert response.status_code == 409 and "GitHub" in response.json()["message"]
+    response = client.post("/api/actions/adopt-deletion/rogue-db")
+    assert response.status_code == 409 and "only missing" in response.json()["message"]
+
+
+def test_missing_diff_page_is_simplified(client: TestClient, fake_watcher: FakeWatcher) -> None:
+    fake_watcher.containers = [c for c in fake_watcher.containers if "cache" not in c.name]
+    assert client.post("/api/reconcile").json()["snapshot"]["counts"]["missing"] == 1
+    response = client.post("/api/actions/adopt-deletion/cache")
+    assert response.status_code == 409 and "GitHub" in response.json()["message"]
+    page = client.get("/diff/cache").text
+    assert "Enforce (Spin Up)" in page and "Adopt Deletion" in page
+    assert "Enforce Kill" not in page and "Field by field" not in page
+    assert "Live Observed State" not in page
+    rogue = client.get("/diff/rogue-db").text
+    assert "Enforce Kill" in rogue and "Live Observed State" in rogue
+    assert 'id="modal-root"' in rogue and "window.confirm" not in rogue
 
 
 def test_whitelist_roundtrip(client: TestClient) -> None:

@@ -27,8 +27,9 @@ class StateStore(Protocol):
         pr_number: int | None,
         pr_url: str | None,
         branch: str | None,
+        kind: str = "adopt",
     ) -> PendingAdoption:
-        """Buffer a container after its adoption pull request was opened."""
+        """Buffer a container or service removal after its pull request was opened."""
         ...
 
     def active_pending(self) -> list[PendingAdoption]:

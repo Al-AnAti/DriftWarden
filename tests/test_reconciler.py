@@ -360,3 +360,42 @@ async def test_mock_baseline_reload_on_file_change(
         assert reconciler.baseline is not None and "extra" in reconciler.baseline.service_names
     finally:
         await reconciler.stop()
+
+
+async def test_adopt_deletion_opens_pr_and_clears_when_service_disappears(
+    monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, cache_container: LiveContainer
+) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    monkeypatch.setenv("WARDEN_MODE", "enforce")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [cache_container]  # web is MISSING
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        with pytest.raises(DriftWardenError):
+            await reconciler.adopt_deletion(cache_container.name)  # not missing
+        result = await reconciler.adopt_deletion("web", note="retired")
+        assert result.ok and result.action == "adopt_deletion" and result.pr_url
+        assert github.pulls[0]["service"] == "web" and "retired" in github.pulls[0]["body"]
+        assert "web:" not in (github.mutated or "") and "cache:" in (github.mutated or "")
+        assert [p.kind for p in reconciler.pending] == ["remove"]
+
+        await reconciler.reconcile("sweep")  # enforcement must not recreate a buffered service
+        assert watcher.recreated == []
+        web = reconciler.projector.snapshot.find("web")
+        assert web is not None and web.drift_status is DriftStatus.PENDING_ADOPTION
+
+        github.content = github.mutated or ""
+        github.sha = "sha-2"
+        assert await reconciler.refresh_baseline(force=True)
+        await asyncio.sleep(0.1)
+        assert reconciler.pending == []
+        assert reconciler.projector.snapshot.find("web") is None
+        assert store.pending_history()[0][1] == "baseline_updated"
+    finally:
+        await reconciler.stop()

@@ -250,6 +250,28 @@ def update_service(raw: str, spec: AdoptionSpec, fields: list[str]) -> tuple[str
     return dump_yaml(document), spec.service_name
 
 
+def remove_service(raw: str, service_name: str) -> str:
+    """Delete a service block from the baseline (Adopt Deletion for a MISSING service).
+
+    Args:
+        raw: Current baseline text.
+        service_name: Service key to remove.
+
+    Returns:
+        The mutated YAML text.
+
+    Raises:
+        YAMLMutationError: If the service is not declared.
+    """
+    document = load_document(raw)
+    services = document.get("services")
+    if not isinstance(services, CommentedMap) or service_name not in services:
+        raise YAMLMutationError(f"Service `{service_name}` is not declared in the baseline")
+    del services[service_name]
+    logger.info("Mutated baseline: removed service {}", service_name)
+    return dump_yaml(document)
+
+
 def _replace(node: CommentedMap, key: str, value: Any) -> None:
     """Set or delete a key on a service node."""
     if value is None:

@@ -70,13 +70,15 @@
                         <td class="px-6 py-3 font-mono text-slate-300">{{ r.image or '—' }}</td>
                         <td class="px-6 py-3 text-slate-300">{{ r.status }}</td>
                         <td class="px-6 py-3 text-slate-400 max-w-md">
-                            {% if r.changed_fields %}<span class="text-amber-300 font-mono text-xs">{{ r.changed_fields | join(', ') }}</span>{% else %}<span class="text-xs">{{ r.message }}</span>{% endif %}
+                            {% set changed = r.changed_fields | reject('equalto', 'state') | list %}
+                            {% if changed %}<span class="text-amber-300 font-mono text-xs">{{ changed | join(', ') }}</span>{% else %}<span class="text-xs">{{ r.message }}</span>{% endif %}
                         </td>
                         <td class="px-6 py-3 text-right whitespace-nowrap space-x-1">
                             <a href="/diff/{{ r.ref }}" class="btn btn-ghost">Diff</a>
-                            {% if 'revert' in r.actions %}<button onclick="wardenAction('revert', '{{ r.ref }}')" class="btn btn-rose">Revert</button>{% endif %}
+                            {% if 'revert' in r.actions %}<button onclick="wardenAction('revert', '{{ r.ref }}')" class="btn btn-rose">{% if r.drift_status.value == 'missing' %}Spin up{% else %}Revert{% endif %}</button>{% endif %}
                             {% if 'kill' in r.actions %}<button onclick="wardenAction('kill', '{{ r.ref }}')" class="btn btn-rose">Kill</button>{% endif %}
                             {% if 'adopt' in r.actions %}<button onclick="wardenAction('adopt', '{{ r.ref }}')" class="btn btn-emerald">Adopt</button>{% endif %}
+                            {% if 'adopt_deletion' in r.actions %}<button onclick="wardenAction('adopt_deletion', '{{ r.ref }}')" class="btn btn-emerald">Adopt deletion</button>{% endif %}
                             {% if 'whitelist' in r.actions %}<button onclick="wardenWhitelist('CONTAINER', '{{ r.container_name }}')" class="btn btn-ghost">Whitelist</button>{% endif %}
                             {% if r.pending_adoption and r.pending_adoption.pr_url %}<a href="{{ r.pending_adoption.pr_url }}" target="_blank" class="btn btn-violet">PR #{{ r.pending_adoption.pr_number }}</a>{% endif %}
                         </td>

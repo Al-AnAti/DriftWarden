@@ -129,6 +129,18 @@ async def adopt(
     return await get_runtime(request).reconciler.adopt(ref, note)
 
 
+@router.post("/actions/adopt-deletion/{ref}", response_model=ActionResult)
+async def adopt_deletion(
+    request: Request,
+    ref: str,
+    payload: AdoptionRequest | None = Body(default=None),
+) -> ActionResult:
+    """Open a pull request removing a MISSING service from the baseline."""
+    note = payload.note if payload is not None else None
+    logger.info("Adopt deletion requested for {}", ref)
+    return await get_runtime(request).reconciler.adopt_deletion(ref, note)
+
+
 @router.get("/whitelist", response_model=list[WhitelistEntry])
 def list_whitelist(request: Request) -> list[WhitelistEntry]:
     """All operator exemptions."""

@@ -7,6 +7,7 @@ from warden.automation.yaml_mutator import (
     AdoptionSpec,
     add_service,
     port_to_compose,
+    remove_service,
     sanitise_service_name,
     unique_service_name,
     update_service,
@@ -112,3 +113,37 @@ def test_unique_service_name() -> None:
 )
 def test_port_to_compose(canonical: str, expected: str) -> None:
     assert port_to_compose(canonical) == expected
+
+
+def test_remove_service_deletes_only_that_block(fixture_yaml: str) -> None:
+    text = remove_service(fixture_yaml, "web")
+    document = load_document(text)
+    assert list(document["services"]) == ["cache"]
+    assert text.startswith("# docker-compose.test.yml")
+    assert '- "6379:6379"' in text
+    with pytest.raises(YAMLMutationError):
+        remove_service(fixture_yaml, "ghost")
+
+
+def test_added_service_keys_are_siblings_under_the_service(fixture_yaml: str) -> None:
+    spec = AdoptionSpec(
+        service_name="svc",
+        image="img:1",
+        ports=["8000:80/tcp"],
+        labels={"a": "b"},
+        restart="always",
+        networks=["backend"],
+        environment_keys=["TOKEN"],
+    )
+    text, _ = add_service(fixture_yaml, spec)
+    block = text.split("  svc:\n", 1)[1]
+    keys = [ln for ln in block.splitlines() if ln.startswith("    ") and not ln.startswith("     ")]
+    assert keys == [
+        "    image: img:1",
+        "    ports:",
+        "    environment:",
+        "    labels:",
+        "    restart: always",
+        "    networks:",
+    ]
+    assert "container_name" not in block

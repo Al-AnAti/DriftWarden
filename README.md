@@ -118,7 +118,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `/buffer` | Active and historical pending adoptions. |
 | `/config` | Effective settings, the raw baseline, exclusions and whitelist management. |
 | `GET /api/state`, `GET /api/state/stream` | Snapshot JSON and the SSE stream. |
-| `POST /api/actions/revert/{ref}`, `/kill/{ref}`, `/adopt/{ref}` | Operator actions (same code path as enforce mode). |
+| `POST /api/actions/revert/{ref}`, `/kill/{ref}`, `/adopt/{ref}`, `/adopt-deletion/{ref}` | Operator actions (same code path as enforce mode); adopt-deletion opens a PR removing a MISSING service. |
 | `GET/POST /api/whitelist`, `DELETE /api/whitelist/{id}` | Exemptions. |
 | `GET /api/audit`, `/api/events`, `/api/buffer`, `/api/health`, `POST /api/reconcile` | Data and a manual refresh. |
 
@@ -134,9 +134,9 @@ Conventions: Python 3.10 syntax floor, `X | None` unions, Pydantic at every boun
 ## 🎬 Demo runners
 
 ```bash
-make demo-infra-up   # docker compose up the fixture stack (project infrastructure-test)
+make demo-up         # docker compose up the fixture stack (project infrastructure-test)
 make demo-drift      # rogue mariadb, delete web (MISSING), spoofed redis:latest cache (DRIFTED)
-make demo-clean      # tear everything down
+make demo-down       # tear everything down
 ```
 
 With the dashboard open, `make demo-drift` shows one `ROGUE`, one `MISSING` and one `DRIFTED` entry within the debounce window. Click **Enforce Baseline (Rollback)** on the cache to recreate it from Git, or **Adopt into Git (Auto-PR)** on the rogue database to open a pull request on `TARGET_REPO`.

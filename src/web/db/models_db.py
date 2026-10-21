@@ -39,6 +39,7 @@ class PendingAdoptionRow(Base):
     __tablename__ = "pending_adoptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(16), default="adopt", server_default="adopt")
     container_id: Mapped[str] = mapped_column(String(128), index=True)
     container_name: Mapped[str] = mapped_column(String(255))
     service_name: Mapped[str] = mapped_column(String(255), index=True)

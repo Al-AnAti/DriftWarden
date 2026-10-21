@@ -38,6 +38,12 @@ INTERNAL_LABEL_PREFIXES: tuple[str, ...] = (
 
 UNSET = "<unset>"
 
+IMPLICIT_NETWORKS: frozenset[str] = frozenset({"default", "bridge", "host", "none"})
+"""Networks never written to a reconstructed Compose service."""
+
+PENDING_REMOVAL_PREFIX = "service:"
+"""Buffer key prefix for a MISSING service whose deletion PR is open."""
+
 
 @dataclass(slots=True)
 class WhitelistIndex:
@@ -229,11 +235,12 @@ def observed_service(
         image=container.image,
         ports=list(container.ports),
         labels=custom_labels(container, image_labels),
-        environment=custom_environment(container, image_env),
-        volumes=container.volumes(project),
+        # Values are never rendered: secrets become ${KEY} placeholders, as in adoption PRs.
+        environment={key: f"${{{key}}}" for key in custom_environment(container, image_env)},
+        volumes=[v for v in container.volumes(project) if not v.startswith(":")],
         restart=None if container.restart == "no" else container.restart,
-        networks=[n for n in project_networks(container, project) if n != "default"],
-        container_name=container.name,
+        networks=[n for n in project_networks(container, project) if n not in IMPLICIT_NETWORKS],
+        container_name=None,
     )
 
 
@@ -435,9 +442,24 @@ def _managed_record(
     project = context.baseline.project_name
     expected_yaml = render_service_yaml(service)
     if container is None:
+        removal = context.pending.get(f"{PENDING_REMOVAL_PREFIX}{service.service_name}")
+        if removal is not None:
+            status = DriftStatus.PENDING_ADOPTION
+            message = (
+                f"Service '{service.service_name}' is buffered while deletion PR "
+                f"#{removal.pr_number} deploys."
+            )
+            actions: list[str] = []
+        else:
+            status = DriftStatus.MISSING
+            message = (
+                f"Service '{service.service_name}' is declared in Git but no container "
+                f"is running on {context.hostname}."
+            )
+            actions = ["revert", "adopt_deletion"]
         return DriftRecord(
             ref=service.service_name,
-            drift_status=DriftStatus.MISSING,
+            drift_status=status,
             service_name=service.service_name,
             project=project,
             image=service.image,
@@ -445,12 +467,10 @@ def _managed_record(
             diffs=[FieldDiff(field="state", expected="running", observed="absent", changed=True)],
             expected_yaml=expected_yaml,
             observed_yaml=None,
-            message=(
-                f"Service '{service.service_name}' is declared in Git but no container "
-                f"is running on {context.hostname}."
-            ),
-            actions=["revert"],
+            message=message,
+            actions=actions,
             detected_at=now,
+            pending_adoption=removal,
         )
 
     diffs = compare(service, container, project)
@@ -463,9 +483,9 @@ def _managed_record(
         status = DriftStatus.MISSING
         message = (
             f"Container '{container.name}' for service '{service.service_name}' "
-            f"is {container.state}."
+            f"is {container.state}; no running instance on {context.hostname}."
         )
-        actions = ["revert", "kill"]
+        actions = ["revert", "adopt_deletion"]
     elif pending is not None:
         status = DriftStatus.PENDING_ADOPTION
         message = f"'{container.name}' is buffered while adoption PR #{pending.pr_number} deploys."

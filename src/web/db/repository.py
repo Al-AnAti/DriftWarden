@@ -32,6 +32,7 @@ def _aware(value: datetime | None) -> datetime:
 def _pending_from_row(row: PendingAdoptionRow) -> PendingAdoption:
     return PendingAdoption(
         id=row.id,
+        kind=row.kind or "adopt",
         container_id=row.container_id,
         container_name=row.container_name,
         service_name=row.service_name,
@@ -118,8 +119,9 @@ class Store:
         pr_number: int | None,
         pr_url: str | None,
         branch: str | None,
+        kind: str = "adopt",
     ) -> PendingAdoption:
-        """Buffer a container after its adoption PR was opened.
+        """Buffer a container (or a service removal) after its PR was opened.
 
         An active entry for the same container is replaced.
         """
@@ -135,6 +137,7 @@ class Store:
                     .values(cleared_at=now, outcome="superseded")
                 )
                 row = PendingAdoptionRow(
+                    kind=kind,
                     container_id=container_id,
                     container_name=container_name,
                     service_name=service_name,

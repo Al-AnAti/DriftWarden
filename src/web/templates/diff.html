@@ -4,12 +4,14 @@
 
 {% block content %}
 {% set meta = status_meta[record.drift_status.value] %}
-<div class="space-y-6" data-diff-ref="{{ record.ref }}" data-diff-status="{{ record.drift_status.value }}">
+{% set status = record.drift_status.value %}
+{% set missing = status == 'missing' %}
+<div class="space-y-6" data-diff-ref="{{ record.ref }}" data-diff-status="{{ status }}">
     <div class="flex flex-wrap items-center gap-3">
         <a href="/" class="text-slate-500 hover:text-slate-300 text-sm">&larr; Dashboard</a>
         <h1 class="text-2xl font-bold tracking-tight">
             {{ meta.label }}
-            {% if record.container_name %}container: <span class="font-mono">{{ record.container_name }}</span>{% else %}service: <span class="font-mono">{{ record.service_name }}</span>{% endif %}
+            {% if missing or not record.container_name %}service: <span class="font-mono">{{ record.service_name }}</span>{% else %}container: <span class="font-mono">{{ record.container_name }}</span>{% endif %}
         </h1>
         <span id="diff-status-badge" class="badge tone-{{ meta.tone }}">{{ meta.label }}</span>
         {% if record.project %}<span class="badge tone-slate">project: {{ record.project }}</span>{% endif %}
@@ -17,15 +19,19 @@
     </div>
 
     <div class="banner tone-{{ meta.tone }}">
-        <strong>{% if record.drift_status.value == 'rogue' %}⚠️ SHADOW IT{% elif record.drift_status.value == 'drifted' %}⚠️ DRIFT{% elif record.drift_status.value == 'missing' %}🕳️ MISSING{% elif record.drift_status.value == 'pending_adoption' %}⏳ PENDING ADOPTION{% else %}✅ MATCHED{% endif %}</strong>
+        <strong>{% if status == 'rogue' %}⚠️ SHADOW IT{% elif status == 'drifted' %}⚠️ DRIFT{% elif missing %}🕳️ MISSING{% elif status == 'pending_adoption' %}⏳ PENDING ADOPTION{% else %}✅ MATCHED{% endif %}</strong>
         &mdash; {{ record.message }}
+        {% if missing %}
+            No running instance of <span class="font-mono">{{ record.service_name }}</span> was found on <span class="font-mono">{{ hostname }}</span>{% if record.container_name %} (a stopped container <span class="font-mono">{{ record.container_name }}</span> is left behind){% endif %}.
+            Spin it up from the baseline, or adopt the deletion so Git stops declaring it.
+        {% endif %}
         {% if record.pending_adoption and record.pending_adoption.pr_url %}
             <a class="underline ml-1" target="_blank" href="{{ record.pending_adoption.pr_url }}">Open PR #{{ record.pending_adoption.pr_number }}</a>
             &middot; expires {{ record.pending_adoption.expires_at.strftime('%H:%M:%S') }} UTC
         {% endif %}
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 {% if not missing %}lg:grid-cols-2{% endif %} gap-6">
         <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <header class="px-5 py-4 border-b border-slate-800 flex items-center gap-2">
                 <span>📄</span>
@@ -36,12 +42,13 @@
                 {% if snapshot.baseline.sha %}<span class="text-slate-600">@{{ snapshot.baseline.sha[:12] }}</span>{% endif %}
             </div>
             {% if record.expected_yaml %}
-                <pre class="code-pane">{% for line in record.expected_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}del{% endif %}">{{ line }}</span>{% endfor %}</pre>
+                <pre class="code-pane">{% for line in record.expected_yaml.rstrip().split('\n') %}<span class="line {% if status == 'drifted' and line.split(':')[0].strip() in changed_fields %}del{% endif %}">{{ line }}</span>{% endfor %}</pre>
             {% else %}
                 <pre class="code-pane"><span class="line del">- (Service not declared in Git repository)</span></pre>
             {% endif %}
         </section>
 
+        {% if not missing %}
         <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <header class="px-5 py-4 border-b border-slate-800 flex items-center gap-2">
                 <span>🐳</span>
@@ -51,14 +58,15 @@
                 {% if record.container_name %}container: {{ record.container_name }} <span class="text-slate-600">({{ record.container_id[:12] }}, detected via docker socket)</span>{% else %}no container{% endif %}
             </div>
             {% if record.observed_yaml %}
-                <pre class="code-pane">{% for line in record.observed_yaml.rstrip().split('\n') %}<span class="line {% if record.drift_status.value == 'rogue' %}add{% elif record.drift_status.value == 'drifted' and line.split(':')[0].strip() in changed_fields %}add{% endif %}">{{ line }}</span>{% endfor %}</pre>
+                <pre class="code-pane">{% for line in record.observed_yaml.rstrip().split('\n') %}<span class="line {% if status == 'rogue' %}add{% elif status == 'drifted' and line.split(':')[0].strip() in changed_fields %}add{% endif %}">{{ line }}</span>{% endfor %}</pre>
             {% else %}
                 <pre class="code-pane"><span class="line del">- (No container running on {{ hostname }})</span></pre>
             {% endif %}
         </section>
+        {% endif %}
     </div>
 
-    {% if record.diffs %}
+    {% if record.diffs and not missing %}
     <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <header class="px-5 py-4 border-b border-slate-800"><h2 class="font-semibold">Field by field</h2></header>
         <table class="min-w-full text-sm">
@@ -82,8 +90,14 @@
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-wrap justify-center gap-6">
         {% if 'revert' in record.actions %}
         <div class="text-center">
-            <button onclick="wardenAction('revert', '{{ record.ref }}')" class="btn-lg btn-rose">[🗑️ Enforce Baseline (Rollback)]</button>
-            <p class="text-xs text-slate-400 mt-2">Recreates <span class="font-mono">{{ record.service_name }}</span> exactly as declared in Git</p>
+            <button onclick="wardenAction('revert', '{{ record.ref }}')" class="btn-lg btn-rose">{% if missing %}[🚀 Enforce (Spin Up)]{% else %}[🗑️ Enforce Baseline (Rollback)]{% endif %}</button>
+            <p class="text-xs text-slate-400 mt-2">{% if missing %}Creates and starts <span class="font-mono">{{ record.service_name }}</span> from the Git baseline{% else %}Recreates <span class="font-mono">{{ record.service_name }}</span> exactly as declared in Git{% endif %}</p>
+        </div>
+        {% endif %}
+        {% if 'adopt_deletion' in record.actions %}
+        <div class="text-center">
+            <button onclick="wardenAction('adopt_deletion', '{{ record.ref }}')" class="btn-lg btn-emerald">[🧹 Adopt Deletion (Auto-PR)]</button>
+            <p class="text-xs text-slate-400 mt-2">Opens a GitHub PR removing <span class="font-mono">{{ record.service_name }}</span> from the baseline</p>
         </div>
         {% endif %}
         {% if 'kill' in record.actions %}

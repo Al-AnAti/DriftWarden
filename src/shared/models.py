@@ -163,11 +163,13 @@ class PendingAdoption(BaseModel):
         branch: Head branch of the pull request.
         created_at: When the adoption was requested.
         expires_at: When the buffer entry is dropped if the baseline never catches up.
+        kind: ``adopt`` (add or sync a service) or ``remove`` (delete a service block).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: int = Field(ge=1)
+    kind: str = "adopt"
     container_id: str = Field(min_length=1)
     container_name: str = Field(min_length=1)
     service_name: str = Field(min_length=1)

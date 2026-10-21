@@ -77,7 +77,7 @@ clean:
 # ------------------------------------------
 
 demo-up:
-	$(BASH_CMD) scripts/demo.sh infra-up
+	$(BASH_CMD) scripts/demo.sh up
 
 demo-drift:
 	$(BASH_CMD) scripts/demo.sh drift

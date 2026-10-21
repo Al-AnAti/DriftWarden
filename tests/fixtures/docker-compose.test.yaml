@@ -1,4 +1,3 @@
-# docker-compose.test.yml
 version: '3.8'
 name: infrastructure-test
 
@@ -10,7 +9,6 @@ services:
     labels:
       - "warden.managed=true"
       - "warden.repo=my-cs-project"
-  
   cache:
     image: redis:alpine
     ports:

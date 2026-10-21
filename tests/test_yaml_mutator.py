@@ -27,9 +27,9 @@ def test_add_service_preserves_comments_and_appends(fixture_yaml: str) -> None:
         restart="always",
         environment_keys=["MARIADB_ROOT_PASSWORD"],
     )
-    text, name = add_service(fixture_yaml, spec)
+    text, name = add_service("# leading comment\n" + fixture_yaml, spec)
     assert name == "rogue-db"
-    assert text.startswith("# docker-compose.test.yml")  # leading comment survives
+    assert text.startswith("# leading comment")  # leading comment survives
     assert '- "8080:80"' in text  # original quoting survives
     document = load_document(text)
     node = document["services"]["rogue-db"]
@@ -116,10 +116,10 @@ def test_port_to_compose(canonical: str, expected: str) -> None:
 
 
 def test_remove_service_deletes_only_that_block(fixture_yaml: str) -> None:
-    text = remove_service(fixture_yaml, "web")
+    text = remove_service("# leading comment\n" + fixture_yaml, "web")
     document = load_document(text)
     assert list(document["services"]) == ["cache"]
-    assert text.startswith("# docker-compose.test.yml")
+    assert text.startswith("# leading comment")
     assert '- "6379:6379"' in text
     with pytest.raises(YAMLMutationError):
         remove_service(fixture_yaml, "ghost")

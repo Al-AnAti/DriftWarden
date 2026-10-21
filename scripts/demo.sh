@@ -3,7 +3,7 @@
 COMMAND=$1
 
 case "$COMMAND" in
-  infra-up)
+  up)
     echo "🏗️ Booting baseline infrastructure from local fixture..."
     docker compose -f tests/fixtures/docker-compose.test.yaml up -d
     echo "✅ Infrastructure running. (Note: DriftWarden validates against GitHub, not this local file)."
@@ -22,9 +22,9 @@ case "$COMMAND" in
     docker run -d --name infrastructure-test-cache-1 -p 6378:6378 \
         --label com.docker.compose.project=infrastructure-test \
         --label com.docker.compose.service=cache \
-        --label warden.managed=true \
-        --label warden.repo=my-cs-project \
-        redis:latest
+        --label warden.managed=false \
+        --label warden.repo=not-my-cs-project \
+        redis:alpine
         
     echo "✅ Chaos injected. Watch the DriftWarden dashboard react!"
     ;;

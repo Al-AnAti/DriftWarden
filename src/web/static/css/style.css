@@ -106,3 +106,51 @@
 }
 
 .toast.show { opacity: 1; transform: translateY(0); }
+
+/* Dark modal (replaces window.confirm / prompt / alert) */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(2, 6, 23, 0.75);
+    backdrop-filter: blur(3px);
+}
+
+.modal-backdrop.hidden { display: none; }
+
+.modal {
+    width: 100%;
+    max-width: 30rem;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 0.9rem;
+    padding: 1.5rem;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
+    animation: modal-in 0.15s ease-out;
+}
+
+@keyframes modal-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-input {
+    display: block;
+    width: 100%;
+    margin-top: 0.35rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #e2e8f0;
+    font-size: 0.9rem;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.modal-input:focus { outline: none; border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.3); }
+.modal-input.invalid { border-color: #f43f5e; }

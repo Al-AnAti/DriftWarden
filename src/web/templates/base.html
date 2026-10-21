@@ -56,6 +56,19 @@
 
     <div id="toasts" class="fixed bottom-5 right-5 space-y-2 z-30"></div>
 
+    <!-- Reusable dark modal; driven by wardenModal() in dashboard.js -->
+    <div id="modal-root" class="modal-backdrop hidden" aria-hidden="true">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <h2 id="modal-title" class="text-lg font-semibold text-slate-100"></h2>
+            <p id="modal-message" class="text-sm text-slate-300 mt-2 whitespace-pre-line"></p>
+            <form id="modal-form" class="mt-4 space-y-3"></form>
+            <div class="mt-6 flex justify-end gap-3">
+                <button type="button" id="modal-cancel" class="btn-lg btn-ghost">Cancel</button>
+                <button type="button" id="modal-confirm" class="btn-lg btn-emerald">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         window.WARDEN = {
             snapshot: {{ snapshot_json | tojson }},

@@ -1,15 +1,18 @@
-/* DriftWarden control plane: live updates over Server-Sent Events and operator actions. */
+/* DriftWarden control plane: live updates over Server-Sent Events, dark modals and operator actions. */
 (function () {
     "use strict";
 
     const W = window.WARDEN || { snapshot: null, statusMeta: {}, overallMeta: {}, page: "" };
     const TONES = ["emerald", "amber", "sky", "rose", "violet", "slate"];
+    const FLASH_KEY = "warden.flash";
 
     function esc(text) {
         return String(text == null ? "" : text).replace(/[&<>"']/g, (c) => ({
             "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
         })[c]);
     }
+
+    /* ------------------------------------------------------------- toasts */
 
     function toast(message, tone) {
         const host = document.getElementById("toasts");
@@ -21,6 +24,93 @@
         setTimeout(() => el.classList.add("show"), 10);
         setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 300); }, 6000);
     }
+
+    /* Queue a toast to be shown on the next page (used around redirects). */
+    function flash(message, tone) {
+        try { sessionStorage.setItem(FLASH_KEY, JSON.stringify({ message, tone })); } catch (e) { /* storage blocked */ }
+    }
+
+    function showFlash() {
+        try {
+            const raw = sessionStorage.getItem(FLASH_KEY);
+            if (!raw) return;
+            sessionStorage.removeItem(FLASH_KEY);
+            const { message, tone } = JSON.parse(raw);
+            toast(message, tone);
+        } catch (e) { /* ignore */ }
+    }
+
+    function redirectHome(message, tone) {
+        flash(message, tone || "emerald");
+        window.location.assign("/");
+    }
+
+    /* -------------------------------------------------------------- modal */
+
+    const modal = {
+        root: null, title: null, message: null, form: null, confirm: null, cancel: null, resolve: null,
+    };
+
+    function modalInit() {
+        modal.root = document.getElementById("modal-root");
+        if (!modal.root) return;
+        modal.title = document.getElementById("modal-title");
+        modal.message = document.getElementById("modal-message");
+        modal.form = document.getElementById("modal-form");
+        modal.confirm = document.getElementById("modal-confirm");
+        modal.cancel = document.getElementById("modal-cancel");
+        modal.cancel.addEventListener("click", () => modalClose(null));
+        modal.confirm.addEventListener("click", modalSubmit);
+        modal.form.addEventListener("submit", (event) => { event.preventDefault(); modalSubmit(); });
+        modal.root.addEventListener("click", (event) => { if (event.target === modal.root) modalClose(null); });
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !modal.root.classList.contains("hidden")) modalClose(null);
+        });
+    }
+
+    function modalSubmit() {
+        const values = {};
+        new FormData(modal.form).forEach((value, key) => { values[key] = String(value).trim(); });
+        for (const input of modal.form.querySelectorAll("[required]")) {
+            if (!input.value.trim()) { input.focus(); input.classList.add("invalid"); return; }
+        }
+        modalClose(values);
+    }
+
+    function modalClose(result) {
+        if (!modal.root) return;
+        modal.root.classList.add("hidden");
+        modal.root.setAttribute("aria-hidden", "true");
+        const resolve = modal.resolve;
+        modal.resolve = null;
+        if (resolve) resolve(result);
+    }
+
+    /**
+     * Open the dark modal. Resolves with an object of input values (or {} when there are
+     * no inputs) on Confirm, and with null on Cancel, Esc or a click outside.
+     * options: { title, message, inputs: [{name, label, placeholder, required, value}], confirmText, danger }
+     */
+    function wardenModal(options) {
+        if (!modal.root) return Promise.resolve({});
+        modal.title.textContent = options.title || "Confirm";
+        modal.message.textContent = options.message || "";
+        modal.form.innerHTML = (options.inputs || []).map((input) =>
+            '<label class="block text-xs uppercase tracking-wider text-slate-400">' + esc(input.label || input.name) +
+            '<input class="modal-input" name="' + esc(input.name) + '" placeholder="' + esc(input.placeholder || "") + '"' +
+            (input.required ? " required" : "") + ' value="' + esc(input.value || "") + '" autocomplete="off"></label>'
+        ).join("");
+        modal.confirm.textContent = options.confirmText || "Confirm";
+        modal.confirm.className = "btn-lg " + (options.danger ? "btn-rose" : "btn-emerald");
+        modal.root.classList.remove("hidden");
+        modal.root.setAttribute("aria-hidden", "false");
+        const first = modal.form.querySelector("input");
+        setTimeout(() => (first || modal.confirm).focus(), 20);
+        return new Promise((resolve) => { modal.resolve = resolve; });
+    }
+    window.wardenModal = wardenModal;
+
+    /* ---------------------------------------------------------- rendering */
 
     function setTone(el, tone) {
         if (!el) return;
@@ -38,20 +128,23 @@
         if (el) el.textContent = text;
     }
 
-    /* ---------------------------------------------------------- rendering */
-
     function badge(status) {
         const meta = W.statusMeta[status] || { label: status, tone: "slate" };
         return '<span class="badge tone-' + meta.tone + '">' + esc(meta.label) + "</span>";
     }
 
+    function actionButton(action, ref, label, cls) {
+        return ' <button onclick="wardenAction(\'' + action + '\', \'' + esc(ref) + '\')" class="btn ' + cls + '">' + label + "</button>";
+    }
+
     function rowHtml(r) {
-        const changed = r.diffs.filter((d) => d.changed).map((d) => d.field);
+        const changed = r.diffs.filter((d) => d.changed && d.field !== "state").map((d) => d.field);
         const service = r.service_name || (r.project ? "project: " + r.project : "—");
         let actions = '<a href="/diff/' + encodeURIComponent(r.ref) + '" class="btn btn-ghost">Diff</a>';
-        if (r.actions.includes("revert")) actions += ' <button onclick="wardenAction(\'revert\', \'' + esc(r.ref) + '\')" class="btn btn-rose">Revert</button>';
-        if (r.actions.includes("kill")) actions += ' <button onclick="wardenAction(\'kill\', \'' + esc(r.ref) + '\')" class="btn btn-rose">Kill</button>';
-        if (r.actions.includes("adopt")) actions += ' <button onclick="wardenAction(\'adopt\', \'' + esc(r.ref) + '\')" class="btn btn-emerald">Adopt</button>';
+        if (r.actions.includes("revert")) actions += actionButton("revert", r.ref, r.drift_status === "missing" ? "Spin up" : "Revert", "btn-rose");
+        if (r.actions.includes("kill")) actions += actionButton("kill", r.ref, "Kill", "btn-rose");
+        if (r.actions.includes("adopt")) actions += actionButton("adopt", r.ref, "Adopt", "btn-emerald");
+        if (r.actions.includes("adopt_deletion")) actions += actionButton("adopt_deletion", r.ref, "Adopt deletion", "btn-emerald");
         if (r.actions.includes("whitelist")) actions += ' <button onclick="wardenWhitelist(\'CONTAINER\', \'' + esc(r.container_name) + '\')" class="btn btn-ghost">Whitelist</button>';
         if (r.pending_adoption && r.pending_adoption.pr_url) actions += ' <a href="' + esc(r.pending_adoption.pr_url) + '" target="_blank" class="btn btn-violet">PR #' + esc(r.pending_adoption.pr_number) + "</a>";
         const finding = changed.length
@@ -116,15 +209,27 @@
         setText("footer-updated", "snapshot " + when + " UTC via " + snapshot.trigger);
     }
 
+    let navigatingAway = false;
+
     function renderDiffPage(snapshot) {
-        if (!W.diffRef) return;
-        const record = snapshot.records.find((r) => r.ref === W.diffRef || r.container_name === W.diffRef || r.service_name === W.diffRef);
+        if (!W.diffRef || navigatingAway) return;
         const root = document.querySelector("[data-diff-ref]");
         if (!root) return;
+        const record = snapshot.records.find((r) => r.ref === W.diffRef || r.container_name === W.diffRef || r.service_name === W.diffRef);
         const previous = root.getAttribute("data-diff-status");
-        const current = record ? record.drift_status : "gone";
-        if (previous !== current) {
-            toast("State of " + W.diffRef + " changed to " + current + "; reloading…", "sky");
+        if (!record) {
+            navigatingAway = true;
+            redirectHome(W.diffRef + " is no longer tracked on this host.", "sky");
+            return;
+        }
+        if (record.drift_status !== previous) {
+            if (record.ref !== W.diffRef) {
+                navigatingAway = true;
+                window.location.replace("/diff/" + encodeURIComponent(record.ref));
+                return;
+            }
+            toast("State of " + W.diffRef + " changed to " + record.drift_status + "; refreshing…", "sky");
+            navigatingAway = true;
             setTimeout(() => window.location.reload(), 800);
         }
     }
@@ -168,38 +273,86 @@
         return data;
     }
 
-    const CONFIRM = {
-        revert: (ref) => "Recreate '" + ref + "' from the Git baseline? The current container will be stopped and removed.",
-        kill: (ref) => "Stop and remove rogue container '" + ref + "'?",
-        adopt: null,
+    const ACTIONS = {
+        revert: {
+            title: "Enforce baseline",
+            message: (ref) => "Recreate '" + ref + "' exactly as declared in Git? Any existing container for this service is stopped and removed first.",
+            confirmText: "Enforce baseline",
+            danger: true,
+            progress: (ref) => "Reverting " + ref + "…",
+            destructive: true,
+        },
+        kill: {
+            title: "Enforce kill",
+            message: (ref) => "Stop and remove rogue container '" + ref + "'? This cannot be undone from DriftWarden.",
+            confirmText: "Kill container",
+            danger: true,
+            progress: (ref) => "Removing " + ref + "…",
+            destructive: true,
+        },
+        adopt: {
+            title: "Adopt into Git",
+            message: (ref) => "Synthesize YAML for '" + ref + "', cut a branch and open a pull request on the baseline repository. Environment values are written as ${KEY} placeholders.",
+            inputs: [{ name: "note", label: "Note for the pull request (optional)", placeholder: "why this workload exists" }],
+            confirmText: "Open pull request",
+            progress: (ref) => "Opening pull request for " + ref + "…",
+            destructive: false,
+            endpoint: "adopt",
+        },
+        adopt_deletion: {
+            title: "Adopt deletion",
+            message: (ref) => "Open a pull request that removes service '" + ref + "' from the baseline, so Git matches the host where it is no longer running.",
+            inputs: [{ name: "note", label: "Note for the pull request (optional)", placeholder: "why the service was retired" }],
+            confirmText: "Open deletion PR",
+            progress: (ref) => "Opening deletion pull request for " + ref + "…",
+            destructive: false,
+            endpoint: "adopt-deletion",
+        },
     };
 
     window.wardenAction = async function (action, ref) {
-        if (CONFIRM[action] && !window.confirm(CONFIRM[action](ref))) return;
-        let body;
-        if (action === "adopt") {
-            const note = window.prompt("Optional note for the pull request body:", "");
-            if (note === null) return;
-            body = { container_id: ref, note: note || null };
-        }
-        toast((action === "adopt" ? "Opening pull request for " : action === "kill" ? "Removing " : "Reverting ") + ref + "…", "sky");
+        const spec = ACTIONS[action];
+        if (!spec) return;
+        const values = await wardenModal({
+            title: spec.title,
+            message: spec.message(ref),
+            inputs: spec.inputs || [],
+            confirmText: spec.confirmText,
+            danger: spec.danger,
+        });
+        if (values === null) return;
+        const body = spec.inputs ? { container_id: ref, note: values.note || null } : undefined;
+        toast(spec.progress(ref), "sky");
         try {
-            const result = await post("/api/actions/" + action + "/" + encodeURIComponent(ref), body);
-            toast(result.message, "emerald");
+            const result = await post("/api/actions/" + (spec.endpoint || action) + "/" + encodeURIComponent(ref), body);
             if (result.pr_url) window.open(result.pr_url, "_blank");
+            if (spec.destructive && W.page === "dashboard" && W.diffRef) {
+                /* On /diff/{name} the target no longer exists under this URL: go home with a toast. */
+                navigatingAway = true;
+                redirectHome(result.message, "emerald");
+                return;
+            }
+            toast(result.message, "emerald");
         } catch (err) {
-            toast(action + " failed: " + err.message, "rose");
+            toast(spec.title + " failed: " + err.message, "rose");
         }
     };
 
     window.wardenWhitelist = async function (type, identifier) {
-        const reason = window.prompt("Reason for whitelisting " + type.toLowerCase() + " '" + identifier + "':", "");
-        if (reason === null) return;
+        const values = await wardenModal({
+            title: "Whitelist " + type.toLowerCase(),
+            message: "'" + identifier + "' will be exempt from drift alerts and autonomous enforcement until the exemption is removed on Cluster Config.",
+            inputs: [{ name: "reason", label: "Reason", placeholder: "e.g. managed by another team", required: true }],
+            confirmText: "Whitelist",
+        });
+        if (values === null) return;
         try {
-            const entry = await post("/api/whitelist", { target_type: type, target_identifier: identifier, reason: reason });
-            toast("Whitelisted " + entry.target_type.toLowerCase() + " " + entry.target_identifier, "emerald");
+            const entry = await post("/api/whitelist", { target_type: type, target_identifier: identifier, reason: values.reason });
+            const message = "Whitelisted " + entry.target_type.toLowerCase() + " " + entry.target_identifier;
+            if (W.diffRef) { navigatingAway = true; redirectHome(message, "emerald"); return; }
+            toast(message, "emerald");
         } catch (err) {
-            toast("whitelist failed: " + err.message, "rose");
+            toast("Whitelist failed: " + err.message, "rose");
         }
     };
 
@@ -210,17 +363,27 @@
             target_type: form.target_type.value,
             target_identifier: form.target_identifier.value.trim(),
             reason: form.reason.value.trim(),
-        }).then(() => window.location.reload()).catch((err) => toast("whitelist failed: " + err.message, "rose"));
+        }).then((entry) => {
+            flash("Whitelisted " + entry.target_type.toLowerCase() + " " + entry.target_identifier, "emerald");
+            window.location.reload();
+        }).catch((err) => toast("Whitelist failed: " + err.message, "rose"));
         return false;
     };
 
     window.wardenUnwhitelist = async function (id, identifier) {
-        if (!window.confirm("Remove exemption for '" + identifier + "'?")) return;
+        const values = await wardenModal({
+            title: "Remove exemption",
+            message: "'" + identifier + "' will be evaluated against the baseline again on the next cycle.",
+            confirmText: "Remove",
+            danger: true,
+        });
+        if (values === null) return;
         try {
-            await post("/api/whitelist/" + id, undefined, "DELETE");
+            const result = await post("/api/whitelist/" + id, undefined, "DELETE");
+            flash(result.message, "emerald");
             window.location.reload();
         } catch (err) {
-            toast("remove failed: " + err.message, "rose");
+            toast("Remove failed: " + err.message, "rose");
         }
     };
 
@@ -229,12 +392,15 @@
         try {
             const data = await post("/api/reconcile");
             apply(data);
-            toast("Reconciled: " + Object.entries(data.snapshot.counts).filter(([, v]) => v).map(([k, v]) => k + "=" + v).join(" ") || "nothing to show", "emerald");
+            const summary = Object.entries(data.snapshot.counts).filter(([, v]) => v).map(([k, v]) => k + "=" + v).join(" ");
+            toast("Reconciled: " + (summary || "nothing to show"), "emerald");
         } catch (err) {
-            toast("reconcile failed: " + err.message, "rose");
+            toast("Reconcile failed: " + err.message, "rose");
         }
     };
 
+    modalInit();
+    showFlash();
     if (W.snapshot) renderChrome(W.snapshot);
     connect();
 })();

@@ -474,7 +474,8 @@ async def test_revoke_adoption_closes_pr_and_restores_status(
         with pytest.raises(DriftWardenError):
             await reconciler.revoke_adoption(entry.id + 99)
         result = await reconciler.revoke_adoption(entry.id)
-        assert result.ok and "closed" in result.message
+        assert result.ok and "PR #1 closed" in result.message
+        assert "Evicted 1 entry" in result.message
         assert github.closed == [
             (1, "Adoption cancelled by the operator from DriftWarden; closing without merging.")
         ]
@@ -640,7 +641,7 @@ async def test_settings_change_live_with_confirmation_and_persist(
         await reconciler2.stop()
 
 
-async def test_revoke_keeps_shared_batch_pr_until_last_entry(
+async def test_revoke_cascades_to_every_entry_sharing_the_pull_request(
     monkeypatch: pytest.MonkeyPatch,
     fixture_yaml: str,
     rogue_container: LiveContainer,
@@ -667,15 +668,21 @@ async def test_revoke_keeps_shared_batch_pr_until_last_entry(
         entries = sorted(reconciler.pending, key=lambda p: p.id)
         assert [p.pr_number for p in entries] == [1, 2]
 
-        # Make both entries share PR 2 to exercise the shared-PR rule.
+        # Make both entries share PR 2: revoking either one revokes the whole batch.
         shared = entries[0].model_copy(update={"pr_number": 2})
         reconciler._pending[shared.container_id] = shared
-        first = await reconciler.revoke_adoption(shared.id)
-        assert "kept open" in first.message and github.closed == []
-        second = await reconciler.revoke_adoption(entries[1].id)
-        assert "closed" in second.message and [n for n, _ in github.closed] == [2]
+        revoked = await reconciler.revoke_adoption(shared.id)
+        assert "PR #2 closed" in revoked.message and "Evicted 2 entries" in revoked.message
+        assert github.closed == [(2, "Batch adoption revoked by operator via DriftWarden")]
         await asyncio.sleep(0.05)
         assert reconciler.pending == []
+        with pytest.raises(DriftWardenError):
+            await reconciler.revoke_adoption(entries[1].id)  # already evicted with the batch
+        snapshot = reconciler.projector.snapshot
+        rogue = snapshot.find("rogue-db")
+        cache = snapshot.find(drifted_cache.name)
+        assert rogue is not None and rogue.drift_status is DriftStatus.ROGUE
+        assert cache is not None and cache.drift_status is DriftStatus.DRIFTED
 
         # Polling asks GitHub once per distinct PR even with several entries.
         await reconciler.batch(BatchRequest(operation="adopt", scope="all"))

@@ -674,7 +674,7 @@
     window.wardenRevokeBuffer = async function (id, name, prNumber) {
         const values = await wardenModal({
             title: "Revoke buffer entry",
-            message: "Close pull request #" + prNumber + " with a note that the adoption was cancelled, drop '" + name + "' from the buffer and re-evaluate it against the baseline?",
+            message: "Close pull request #" + prNumber + " with a note that the adoption was revoked, evict '" + name + "' and every other buffered entry that shares that pull request, and re-evaluate them against the baseline?",
             confirmText: "Revoke and close PR",
             danger: true,
         });

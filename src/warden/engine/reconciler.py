@@ -1153,49 +1153,60 @@ class Reconciler:
         )
 
     async def revoke_adoption(self, entry_id: int) -> ActionResult:
-        """Close the adoption pull request and drop the entry from the buffer.
+        """Close the adoption pull request and evict every buffer entry that shares it.
 
-        The workload returns to its real status (ROGUE, DRIFTED or MISSING) on the
-        next cycle, which is scheduled immediately.
+        Entries created by Adopt All share one pull request, so revoking any of them
+        revokes the whole batch: the PR is closed with a comment and all of its
+        entries leave the buffer at once. Every affected workload returns to its
+        real status (ROGUE, DRIFTED or MISSING) on the next cycle, which is
+        scheduled immediately.
         """
         pending = next((p for p in self._pending.values() if p.id == entry_id), None)
         if pending is None:
             raise DriftWardenError(f"No active buffer entry with id {entry_id}")
-        note = "Adoption cancelled by the operator from DriftWarden; closing without merging."
-        sharing = [
-            p
-            for p in self._pending.values()
-            if p.id != pending.id and p.pr_number == pending.pr_number
-        ]
+        if pending.pr_number is None:
+            evicted = [pending]
+        else:
+            evicted = [p for p in self._pending.values() if p.pr_number == pending.pr_number]
+        note = (
+            "Batch adoption revoked by operator via DriftWarden"
+            if len(evicted) > 1
+            else "Adoption cancelled by the operator from DriftWarden; closing without merging."
+        )
         closed = False
-        if self.github is not None and pending.pr_number is not None and not sharing:
+        if self.github is not None and pending.pr_number is not None:
             try:
                 await asyncio.to_thread(self.github.close_pull, pending.pr_number, note)
                 closed = True
             except AdoptionError as exc:
                 logger.warning("Revoke: {}", exc)
-        await asyncio.to_thread(self.store.clear_pending, pending.id, "revoked")
-        self._pending.pop(pending.container_id, None)
-        self._pr_unreachable_since.pop(pending.id, None)
-        if sharing:
-            detail = (
-                f"PR #{pending.pr_number} kept open: {len(sharing)} other buffered "
-                f"{'entry' if len(sharing) == 1 else 'entries'} still depend on it"
-            )
+        pr_label = f"PR #{pending.pr_number}" if pending.pr_number is not None else "no PR"
+        if pending.pr_number is None:
+            detail = "no pull request to close"
         elif closed:
-            detail = f"PR #{pending.pr_number} closed"
+            detail = f"{pr_label} closed"
         else:
-            detail = f"PR #{pending.pr_number} left as is"
-        await asyncio.to_thread(
-            self.store.record_audit, AuditAction.ADOPTION_REVOKED, pending.container_name, detail
-        )
+            detail = f"{pr_label} could not be closed on GitHub; evicted anyway"
+        for entry in evicted:
+            await asyncio.to_thread(self.store.clear_pending, entry.id, "revoked")
+            self._pending.pop(entry.container_id, None)
+            self._pr_unreachable_since.pop(entry.id, None)
+            await asyncio.to_thread(
+                self.store.record_audit,
+                AuditAction.ADOPTION_REVOKED,
+                entry.container_name,
+                f"{detail}; {len(evicted)} buffered entr{'y' if len(evicted) == 1 else 'ies'} "
+                "evicted",
+            )
         self.schedule_reconcile("revoke")
+        names = ", ".join(sorted(e.container_name for e in evicted))
         return ActionResult(
             ok=True,
             action="revoke",
             target=pending.container_name,
             message=(
-                f"Revoked adoption of {pending.container_name}: {detail}; "
+                f"Revoked {pr_label}: {detail}. Evicted {len(evicted)} "
+                f"entr{'y' if len(evicted) == 1 else 'ies'} from the buffer ({names}); "
                 "re-evaluating against the baseline."
             ),
             pr_url=pending.pr_url,

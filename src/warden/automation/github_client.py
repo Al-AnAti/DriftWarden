@@ -220,6 +220,27 @@ class GitHubClient:
             return "merged"
         return "open" if str(pull.state) == "open" else "closed"
 
+    def close_pull(self, number: int, comment: str) -> None:
+        """Comment on and close a pull request.
+
+        Args:
+            number: Pull request number.
+            comment: Note posted before closing.
+
+        Raises:
+            AdoptionError: If GitHub refuses either call.
+        """
+        try:
+            pull = self._repo().get_pull(number)
+            if str(pull.state) == "open":
+                pull.create_issue_comment(comment)
+                pull.edit(state="closed")
+        except GithubException as exc:
+            raise AdoptionError(f"Cannot close PR #{number}: {_describe(exc)}") from exc
+        except Exception as exc:
+            raise AdoptionError(f"Cannot close PR #{number}: {exc}") from exc
+        logger.info("Closed adoption PR #{}", number)
+
     def find_open_adoption_pr(self, container_name: str) -> AdoptionPullRequest | None:
         """Find an open adoption pull request for a container, if one exists.
 

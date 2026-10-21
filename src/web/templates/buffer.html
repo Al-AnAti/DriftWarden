@@ -9,7 +9,7 @@
         <p class="text-sm text-slate-400 mt-1">
             Containers adopted via pull request stay here, exempt from enforcement, for as long as their pull request is open.
             A merge triggers a baseline re-fetch that clears the entry; closing the PR without merging returns the workload to its real state.
-            <span class="font-mono">ADOPTION_BUFFER_TTL_SECONDS={{ settings.adoption_buffer_ttl_seconds }}</span> is only a fallback for entries with no pull request.
+            <span class="font-mono">ADOPTION_BUFFER_TTL_SECONDS={{ settings.adoption_buffer_ttl_seconds }}</span> is only a safety fallback for entries whose pull request state cannot be determined.
         </p>
     </div>
 
@@ -27,7 +27,7 @@
         <header class="px-6 py-4 border-b border-slate-800"><h2 class="font-semibold">Active entries ({{ pending | length }})</h2></header>
         <table class="min-w-full text-sm">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-6 py-2">Entry</th><th class="text-left px-6 py-2">Kind</th><th class="text-left px-6 py-2">Service</th><th class="text-left px-6 py-2">Pull request</th><th class="text-left px-6 py-2">PR state</th><th class="text-left px-6 py-2">Created (UTC)</th></tr>
+                <tr><th class="text-left px-6 py-2">Entry</th><th class="text-left px-6 py-2">Kind</th><th class="text-left px-6 py-2">Service</th><th class="text-left px-6 py-2">Pull request</th><th class="text-left px-6 py-2">PR state</th><th class="text-left px-6 py-2">Created (UTC)</th><th class="text-right px-6 py-2"></th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800 font-mono text-xs">
                 {% for p in pending %}
@@ -38,9 +38,10 @@
                     <td class="px-6 py-2">{% if p.pr_url %}<a class="text-emerald-300 hover:underline" target="_blank" href="{{ p.pr_url }}">#{{ p.pr_number }}</a> <span class="text-slate-500">{{ p.branch }}</span>{% else %}—{% endif %}</td>
                     <td class="px-6 py-2 {% if p.pr_state == 'merged' %}text-emerald-300{% elif p.pr_state == 'closed' %}text-rose-300{% else %}text-violet-300{% endif %}">{{ p.pr_state }}</td>
                     <td class="px-6 py-2 text-slate-400">{{ p.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-6 py-2 text-right"><button onclick="wardenRevokeBuffer({{ p.id }}, '{{ p.container_name }}', {{ p.pr_number | tojson }})" class="btn btn-rose">[ Revoke Buffer ]</button></td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">Nothing is buffered.</td></tr>
+                <tr><td colspan="7" class="px-6 py-8 text-center text-slate-500">Nothing is buffered.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -60,7 +61,7 @@
                     <td class="px-6 py-2">{{ p.service_name }}</td>
                     <td class="px-6 py-2">{% if p.pr_url %}<a class="text-indigo-300 hover:underline" target="_blank" href="{{ p.pr_url }}">#{{ p.pr_number }}</a> <span class="text-slate-500">{{ p.pr_state }}</span>{% else %}—{% endif %}</td>
                     <td class="px-6 py-2 text-slate-400">{{ p.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-6 py-2 {% if outcome in ('baseline_updated', 'pr_merged') %}text-emerald-300{% elif outcome in ('expired', 'pr_closed') %}text-amber-300{% elif outcome %}text-slate-400{% else %}text-violet-300{% endif %}">{{ outcome or 'active' }}</td>
+                    <td class="px-6 py-2 {% if outcome in ('baseline_updated', 'pr_merged') %}text-emerald-300{% elif outcome in ('expired', 'pr_closed', 'revoked') %}text-amber-300{% elif outcome %}text-slate-400{% else %}text-violet-300{% endif %}">{{ outcome or 'active' }}</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No adoptions yet.</td></tr>

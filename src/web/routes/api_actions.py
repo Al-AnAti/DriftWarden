@@ -13,7 +13,11 @@ from shared.models import (
     ActionResult,
     AdoptionRequest,
     AuditLogEntry,
+    BatchRequest,
+    BatchResult,
     PendingAdoption,
+    SettingUpdate,
+    SettingView,
     WhitelistEntry,
     WhitelistRequest,
 )
@@ -139,6 +143,38 @@ async def adopt_deletion(
     note = payload.note if payload is not None else None
     logger.info("Adopt deletion requested for {}", ref)
     return await get_runtime(request).reconciler.adopt_deletion(ref, note)
+
+
+@router.post("/actions/batch")
+async def batch(request: Request, payload: BatchRequest) -> dict[str, Any]:
+    """Enforce All or Adopt All over a scope of workloads."""
+    logger.info("Batch {} requested over scope {}", payload.operation, payload.scope)
+    result: BatchResult = await get_runtime(request).reconciler.batch(payload)
+    return {
+        **result.model_dump(mode="json"),
+        "succeeded": result.succeeded,
+        "failed": result.failed,
+    }
+
+
+@router.get("/settings", response_model=list[SettingView])
+def list_settings(request: Request) -> list[SettingView]:
+    """Operator-editable runtime settings."""
+    return get_runtime(request).reconciler.setting_views()
+
+
+@router.put("/settings", response_model=SettingView)
+async def update_setting(request: Request, payload: SettingUpdate) -> SettingView:
+    """Change one runtime setting live; the override is stored in SQLite."""
+    logger.info("Setting change requested: {}", payload.key)
+    return await get_runtime(request).reconciler.apply_setting(payload)
+
+
+@router.post("/buffer/{entry_id}/revoke", response_model=ActionResult)
+async def revoke_buffer(request: Request, entry_id: int) -> ActionResult:
+    """Close the adoption pull request and drop the entry from the buffer."""
+    logger.info("Buffer revoke requested for entry {}", entry_id)
+    return await get_runtime(request).reconciler.revoke_adoption(entry_id)
 
 
 @router.get("/whitelist", response_model=list[WhitelistEntry])

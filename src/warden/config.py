@@ -109,7 +109,7 @@ class WardenSettings(BaseSettings):
         validation_alias="ENFORCEMENT_GRACE_SECONDS",
     )
     adoption_buffer_ttl_seconds: int = Field(
-        default=180,
+        default=600,
         ge=0,
         validation_alias="ADOPTION_BUFFER_TTL_SECONDS",
     )

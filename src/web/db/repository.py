@@ -17,6 +17,7 @@ from web.db.models_db import (
     AuditLogRow,
     DriftEventRow,
     PendingAdoptionRow,
+    SettingOverrideRow,
     WhitelistedEntityRow,
 )
 from web.db.session import Database
@@ -317,6 +318,39 @@ class Store:
             }
             for row in rows
         ]
+
+    # ------------------------------------------------------------- settings
+
+    def list_settings(self) -> dict[str, str]:
+        """Operator overrides keyed by settings attribute name."""
+        with self._db.session() as session:
+            rows = session.scalars(select(SettingOverrideRow)).all()
+        return {row.key: row.value for row in rows}
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Insert or replace an override."""
+        try:
+            with self._db.write() as session:
+                row = session.get(SettingOverrideRow, key)
+                if row is None:
+                    session.add(
+                        SettingOverrideRow(
+                            key=key, value=value, updated_at=datetime.now(timezone.utc)
+                        )
+                    )
+                else:
+                    row.value = value
+                    row.updated_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot save setting {key}: {exc}") from exc
+
+    def delete_setting(self, key: str) -> None:
+        """Drop an override so the environment value applies again."""
+        try:
+            with self._db.write() as session:
+                session.execute(delete(SettingOverrideRow).where(SettingOverrideRow.key == key))
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot delete setting {key}: {exc}") from exc
 
     def counts(self) -> dict[str, int]:
         """Row counts for the Cluster Config page."""

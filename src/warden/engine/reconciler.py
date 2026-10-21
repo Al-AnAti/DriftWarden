@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
+from pydantic import ValidationError
 
 from shared.constants import (
     WARDEN_ACTION_LABEL,
@@ -38,10 +39,14 @@ from shared.exceptions import (
 from shared.models import (
     ActionResult,
     BaselineInfo,
+    BatchRequest,
+    BatchResult,
     DriftRecord,
     HostSnapshot,
     PendingAdoption,
     RawDockerEvent,
+    SettingUpdate,
+    SettingView,
     WhitelistEntry,
     WhitelistRequest,
 )
@@ -73,6 +78,56 @@ ACTION_CACHE_TTL_SECONDS = 20.0
 ENFORCEMENT_COOLDOWN_SECONDS = 60.0
 """Minimum time between two autonomous actions on the same entry (loop guard)."""
 
+AUTONOMOUS_CONFIRMATION = "ENABLE AUTONOMOUS"
+"""Phrase an operator must type to switch WARDEN_MODE to enforce at runtime."""
+
+EDITABLE_SETTINGS: tuple[tuple[str, str, str, str, str], ...] = (
+    ("warden_mode", "WARDEN_MODE", "Guardrail mode", "mode", "observe or enforce"),
+    (
+        "drift_debounce_seconds",
+        "DRIFT_DEBOUNCE_SECONDS",
+        "Event debounce (s)",
+        "float",
+        "Quiet window that coalesces Docker events into one reconcile",
+    ),
+    (
+        "baseline_poll_interval_seconds",
+        "BASELINE_POLL_INTERVAL_SECONDS",
+        "Baseline poll (s)",
+        "int",
+        "How often GitHub is polled (ETag cached) and pull requests are checked",
+    ),
+    (
+        "reconcile_sweep_interval_seconds",
+        "RECONCILE_SWEEP_INTERVAL_SECONDS",
+        "Sweep interval (s)",
+        "int",
+        "Periodic full reconcile for events missed during reconnects",
+    ),
+    (
+        "enforcement_grace_seconds",
+        "ENFORCEMENT_GRACE_SECONDS",
+        "Enforcement grace (s)",
+        "int",
+        "Enforcement is suppressed this long after a baseline or mode change",
+    ),
+    (
+        "adoption_buffer_ttl_seconds",
+        "ADOPTION_BUFFER_TTL_SECONDS",
+        "Buffer safety TTL (s)",
+        "int",
+        "Fallback only for buffer entries whose pull request state cannot be determined",
+    ),
+    (
+        "excluded_name_prefixes",
+        "EXCLUDED_NAME_PREFIXES",
+        "Excluded name prefixes",
+        "text",
+        "Comma-separated container name prefixes that are never evaluated",
+    ),
+)
+"""(settings key, env var, label, widget kind, help) for Cluster Config."""
+
 
 class Reconciler:
     """Coordinates baseline ingestion, Docker events, diffing and remediation.
@@ -103,6 +158,7 @@ class Reconciler:
         self.baseline_error: str | None = None
         self._etag: str | None = None
         self._baseline_changed_at: float | None = None
+        self._pr_unreachable_since: dict[int, float] = {}
         self._mock_digest: str | None = None
 
         self._queue: asyncio.Queue[RawDockerEvent] = asyncio.Queue()
@@ -114,6 +170,8 @@ class Reconciler:
         self._image_env_cache: dict[str, dict[str, str]] = {}
         self._image_labels_cache: dict[str, dict[str, str]] = {}
         self._pending: dict[str, PendingAdoption] = {}
+        self._overrides: dict[str, str] = {}
+        self._environment_defaults: dict[str, object] = {}
         self._whitelist = WhitelistIndex()
         self.startup_done = False
         self.last_cycle_error: str | None = None
@@ -125,6 +183,7 @@ class Reconciler:
     async def start(self) -> None:
         """Load durable state, fetch the baseline, run the observe-only pass, start loops."""
         await asyncio.to_thread(self._reload_durable_state)
+        await self._apply_stored_settings()
         await self.refresh_baseline(force=True)
         await self.reconcile("startup")
         self.startup_done = True
@@ -352,7 +411,9 @@ class Reconciler:
                 state = await asyncio.to_thread(self.github.pull_state, pending.pr_number)
             except GitBaselineFetchError as exc:
                 logger.warning("Cannot check PR #{}: {}", pending.pr_number, exc)
+                self._pr_unreachable_since.setdefault(pending.id, time.monotonic())
                 continue
+            self._pr_unreachable_since.pop(pending.id, None)
             if state == pending.pr_state:
                 continue
             await asyncio.to_thread(self.store.set_pending_state, pending.id, state)
@@ -509,7 +570,7 @@ class Reconciler:
                 exempt=evaluation.exempt,
             )
             transitions = self.projector.transitions(snapshot)
-            self.projector.publish(snapshot)
+            self.projector.publish(snapshot, transitions)
             await asyncio.to_thread(self._persist_transitions, transitions)
             logger.info(
                 "Reconcile ({}) {} containers -> {}",
@@ -553,22 +614,30 @@ class Reconciler:
                 )
 
     async def _expire_pending(self) -> None:
-        """Fallback TTL for entries that have no pull request to follow.
+        """Safety TTL for entries whose pull request state cannot be determined.
 
-        Entries backed by a pull request never expire here; ``poll_pull_requests``
-        decides their fate from the PR state.
+        Entries with a reachable pull request never expire here; ``poll_pull_requests``
+        decides their fate from the PR state. Entries without a PR, or whose PR has
+        been unreachable for ``ADOPTION_BUFFER_TTL_SECONDS``, are dropped.
         """
+        ttl = self.settings.adoption_buffer_ttl_seconds
         now = datetime.now(timezone.utc)
         for pending in list(self._pending.values()):
-            if pending.pr_number is None and pending.expires_at <= now:
-                await asyncio.to_thread(self.store.clear_pending, pending.id, "expired")
-                await asyncio.to_thread(
-                    self.store.record_audit,
-                    AuditAction.ADOPTION_EXPIRED,
-                    pending.container_name,
-                    f"TTL elapsed before baseline declared {pending.service_name}",
-                )
-                self._pending.pop(pending.container_id, None)
+            if pending.pr_number is None:
+                expired = pending.expires_at <= now
+                why = f"no pull request to follow for {pending.service_name}"
+            else:
+                since = self._pr_unreachable_since.get(pending.id)
+                expired = ttl > 0 and since is not None and time.monotonic() - since >= ttl
+                why = f"PR #{pending.pr_number} state unknown for {ttl}s"
+            if not expired:
+                continue
+            await asyncio.to_thread(self.store.clear_pending, pending.id, "expired")
+            await asyncio.to_thread(
+                self.store.record_audit, AuditAction.ADOPTION_EXPIRED, pending.container_name, why
+            )
+            self._pending.pop(pending.container_id, None)
+            self._pr_unreachable_since.pop(pending.id, None)
 
     # ---------------------------------------------------------- enforcement
 
@@ -893,6 +962,157 @@ class Reconciler:
             ),
             pr_url=pull.url,
         )
+
+    async def revoke_adoption(self, entry_id: int) -> ActionResult:
+        """Close the adoption pull request and drop the entry from the buffer.
+
+        The workload returns to its real status (ROGUE, DRIFTED or MISSING) on the
+        next cycle, which is scheduled immediately.
+        """
+        pending = next((p for p in self._pending.values() if p.id == entry_id), None)
+        if pending is None:
+            raise DriftWardenError(f"No active buffer entry with id {entry_id}")
+        note = "Adoption cancelled by the operator from DriftWarden; closing without merging."
+        closed = False
+        if self.github is not None and pending.pr_number is not None:
+            try:
+                await asyncio.to_thread(self.github.close_pull, pending.pr_number, note)
+                closed = True
+            except AdoptionError as exc:
+                logger.warning("Revoke: {}", exc)
+        await asyncio.to_thread(self.store.clear_pending, pending.id, "revoked")
+        self._pending.pop(pending.container_id, None)
+        self._pr_unreachable_since.pop(pending.id, None)
+        detail = (
+            f"PR #{pending.pr_number} closed" if closed else f"PR #{pending.pr_number} left as is"
+        )
+        await asyncio.to_thread(
+            self.store.record_audit, AuditAction.ADOPTION_REVOKED, pending.container_name, detail
+        )
+        self.schedule_reconcile("revoke")
+        return ActionResult(
+            ok=True,
+            action="revoke",
+            target=pending.container_name,
+            message=(
+                f"Revoked adoption of {pending.container_name}: {detail}; "
+                "re-evaluating against the baseline."
+            ),
+            pr_url=pending.pr_url,
+        )
+
+    async def batch(self, request: BatchRequest) -> BatchResult:
+        """Run Enforce All or Adopt All over a scope of the current snapshot."""
+        wanted: set[DriftStatus] = {
+            "all": {DriftStatus.ROGUE, DriftStatus.DRIFTED, DriftStatus.MISSING},
+            "rogue": {DriftStatus.ROGUE},
+            "drifted": {DriftStatus.DRIFTED},
+        }[request.scope]
+        targets = [r for r in self.projector.snapshot.records if r.drift_status in wanted]
+        await asyncio.to_thread(
+            self.store.record_audit,
+            AuditAction.BATCH_REQUESTED,
+            f"{request.operation}:{request.scope}",
+            ", ".join(r.ref for r in targets) or "nothing in scope",
+        )
+        results: list[ActionResult] = []
+        for record in targets:
+            try:
+                if request.operation == "enforce":
+                    if record.drift_status is DriftStatus.ROGUE:
+                        result = await self._kill_record(record, autonomous=False)
+                    else:
+                        result = await self._revert_record(record, autonomous=False)
+                elif record.drift_status is DriftStatus.MISSING:
+                    result = await self.adopt_deletion(record.ref, request.note)
+                else:
+                    result = await self.adopt(record.ref, request.note)
+            except DriftWardenError as exc:
+                result = ActionResult(
+                    ok=False, action=request.operation, target=record.ref, message=str(exc)
+                )
+            results.append(result)
+        self.schedule_reconcile("batch")
+        return BatchResult(operation=request.operation, scope=request.scope, results=results)
+
+    # ------------------------------------------------------------- settings
+
+    def setting_views(self) -> list[SettingView]:
+        """Operator-editable settings with their effective and default values."""
+        views: list[SettingView] = []
+        for key, env, label, kind, help_text in EDITABLE_SETTINGS:
+            views.append(
+                SettingView(
+                    key=key,
+                    env=env,
+                    label=label,
+                    kind=kind,
+                    value=str(getattr(self.settings, key)),
+                    default=str(self._environment_defaults.get(key, "")),
+                    overridden=key in self._overrides,
+                    help=help_text,
+                )
+            )
+        return views
+
+    async def _apply_stored_settings(self) -> None:
+        """Re-apply SQLite overrides on startup; they win over the environment."""
+        self._environment_defaults = {
+            key: getattr(self.settings, key) for key, *_ in EDITABLE_SETTINGS
+        }
+        stored = await asyncio.to_thread(self.store.list_settings)
+        for key, value in stored.items():
+            try:
+                self._assign_setting(key, value)
+                self._overrides[key] = value
+            except ConfigurationError as exc:
+                logger.warning("Ignoring stored override {}={!r}: {}", key, value, exc)
+                await asyncio.to_thread(self.store.delete_setting, key)
+        if self._overrides:
+            logger.info("Applied setting overrides: {}", sorted(self._overrides))
+
+    def _assign_setting(self, key: str, value: str) -> None:
+        if key not in {k for k, *_ in EDITABLE_SETTINGS}:
+            raise ConfigurationError(f"{key} is not an editable setting")
+        try:
+            setattr(self.settings, key, value)
+        except ValidationError as exc:
+            detail = "; ".join(str(err.get("msg", "")) for err in exc.errors())
+            raise ConfigurationError(f"Invalid value for {key}: {detail}") from exc
+
+    async def apply_setting(self, update: SettingUpdate) -> SettingView:
+        """Change a runtime setting live and persist it as an override.
+
+        Switching ``warden_mode`` to ``enforce`` requires the confirmation phrase
+        ``ENABLE AUTONOMOUS`` and re-arms the enforcement grace window.
+        """
+        value = update.value.strip()
+        if update.key == "warden_mode":
+            value = value.lower()
+            if value == "enforce" and self.settings.warden_mode != "enforce":
+                if (update.confirmation or "").strip() != AUTONOMOUS_CONFIRMATION:
+                    raise ConfigurationError(
+                        f"Type {AUTONOMOUS_CONFIRMATION} to enable autonomous enforcement"
+                    )
+        previous = str(getattr(self.settings, update.key, ""))
+        self._assign_setting(update.key, value)
+        if update.key == "warden_mode" and value == "enforce":
+            self._baseline_changed_at = time.monotonic()  # grace window before acting
+        if value == str(self._environment_defaults.get(update.key, "")):
+            await asyncio.to_thread(self.store.delete_setting, update.key)
+            self._overrides.pop(update.key, None)
+        else:
+            await asyncio.to_thread(self.store.set_setting, update.key, value)
+            self._overrides[update.key] = value
+        await asyncio.to_thread(
+            self.store.record_audit,
+            AuditAction.SETTINGS_CHANGED,
+            update.key,
+            f"{previous!r} -> {value!r}",
+        )
+        self.projector.mode = self.settings.warden_mode
+        self.schedule_reconcile("settings")
+        return next(v for v in self.setting_views() if v.key == update.key)
 
     async def whitelist(self, request: WhitelistRequest) -> WhitelistEntry:
         """Exempt a container or project and re-evaluate the host."""

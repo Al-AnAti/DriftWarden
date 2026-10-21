@@ -171,4 +171,5 @@ def config_page(request: Request) -> HTMLResponse:
     context["baseline"] = runtime.projector.snapshot.baseline
     context["excluded_prefixes"] = runtime.settings.excluded_prefixes
     context["github_configured"] = runtime.settings.github_pat is not None
+    context["editable_settings"] = runtime.reconciler.setting_views()
     return templates.TemplateResponse(request, "config.html", context)

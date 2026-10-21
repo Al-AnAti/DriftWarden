@@ -30,6 +30,8 @@ from .models import (
     AdoptionRequest,
     AuditLogEntry,
     BaselineInfo,
+    BatchRequest,
+    BatchResult,
     ContainerState,
     DriftRecord,
     FieldDiff,
@@ -37,6 +39,8 @@ from .models import (
     ParsedService,
     PendingAdoption,
     RawDockerEvent,
+    SettingUpdate,
+    SettingView,
     WhitelistEntry,
     WhitelistRequest,
 )
@@ -73,4 +77,8 @@ __all__ = [
     "WhitelistEntry",
     "AuditLogEntry",
     "ActionResult",
+    "BatchRequest",
+    "BatchResult",
+    "SettingView",
+    "SettingUpdate",
 ]

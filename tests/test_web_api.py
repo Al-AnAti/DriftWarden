@@ -175,3 +175,43 @@ def test_line_diff_targets_children_not_parents() -> None:
     assert left[2].text == "  labels:" and left[2].sign == ""
     rogue_left, rogue_right = line_diff(None, "x:\n  image: y\n")
     assert rogue_left == [] and [ln.sign for ln in rogue_right] == ["+", "+"]
+
+
+def test_settings_endpoints(client: TestClient) -> None:
+    views = client.get("/api/settings").json()
+    assert {v["key"] for v in views} >= {"warden_mode", "enforcement_grace_seconds"}
+    response = client.put("/api/settings", json={"key": "warden_mode", "value": "enforce"})
+    assert response.status_code == 409 and "ENABLE AUTONOMOUS" in response.json()["message"]
+    response = client.put(
+        "/api/settings",
+        json={"key": "warden_mode", "value": "enforce", "confirmation": "ENABLE AUTONOMOUS"},
+    )
+    assert response.status_code == 200 and response.json()["value"] == "enforce"
+    assert client.get("/api/health").json()["mode"] == "enforce"
+    assert "ENABLE AUTONOMOUS" in client.get("/config").text
+    client.put("/api/settings", json={"key": "warden_mode", "value": "observe"})
+
+
+def test_batch_endpoint(client: TestClient, fake_watcher: FakeWatcher) -> None:
+    response = client.post("/api/actions/batch", json={"operation": "enforce", "scope": "rogue"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded"] == 1 and body["results"][0]["target"] == "rogue-db"
+    assert any(c.name == "rogue-db" for c in fake_watcher.containers) is False
+    assert client.post("/api/actions/batch", json={"operation": "nope"}).status_code == 422
+
+
+def test_revoke_buffer_endpoint_requires_active_entry(client: TestClient) -> None:
+    response = client.post("/api/buffer/123/revoke")
+    assert response.status_code == 409 and "No active buffer entry" in response.json()["message"]
+
+
+def test_sse_payload_carries_transitions(client: TestClient, fake_watcher: FakeWatcher) -> None:
+    projector = web_app.app.state.warden.projector
+    queue = projector.subscribe()
+    fake_watcher.containers = [c for c in fake_watcher.containers if c.name != "rogue-db"]
+    client.post("/api/reconcile")
+    message = json.loads(queue.get_nowait())
+    projector.unsubscribe(queue)
+    assert message["transitions"] == [] or all("status" in t for t in message["transitions"])
+    assert message["snapshot"]["counts"]["rogue"] == 0

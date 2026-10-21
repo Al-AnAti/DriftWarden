@@ -102,7 +102,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `DRIFT_DEBOUNCE_SECONDS` | `2` | Single global quiet window that coalesces Docker events into one reconcile. |
 | `RECONCILE_SWEEP_INTERVAL_SECONDS` | `60` | Periodic full reconcile for events missed during reconnects. |
 | `ENFORCEMENT_GRACE_SECONDS` | `30` | Enforcement is suppressed this long after every baseline change, and the baseline is re-fetched before any destructive action. |
-| `ADOPTION_BUFFER_TTL_SECONDS` | `180` | Fallback timeout only for buffer entries that have no pull request to follow. |
+| `ADOPTION_BUFFER_TTL_SECONDS` | `600` | Safety fallback only for buffer entries whose pull request state cannot be determined. |
 | `EXCLUDED_NAME_PREFIXES` | `warden-,driftwarden,k8s_` | Containers never evaluated. |
 | `DOCKER_SOCKET_PATH` / `DOCKER_BASE_URL` | `/var/run/docker.sock` / unset | Socket path, or an explicit `npipe://` / `tcp://` URL; otherwise `docker.from_env()`. |
 | `DATABASE_URL` | `sqlite:///./warden.db` | Audit log, buffer, whitelist and drift events (WAL mode). |
@@ -116,10 +116,13 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `/diff/{name}` | Git baseline on the left, live observed state on the right, field-by-field table, action buttons. |
 | `/events` | Drift transitions and the audit log. |
 | `/buffer` | Active and historical pending adoptions. |
-| `/config` | Effective settings, the raw baseline, exclusions and whitelist management. |
+| `/config` | Editable runtime settings (overrides live in SQLite and win over the environment; switching to enforce requires typing `ENABLE AUTONOMOUS`), the raw baseline, exclusions and whitelist management. |
 | `GET /api/state`, `GET /api/state/stream` | Snapshot JSON and the SSE stream. |
 | `POST /api/actions/revert/{ref}`, `/kill/{ref}`, `/adopt/{ref}`, `/adopt-deletion/{ref}` | Operator actions (same code path as enforce mode); adopt-deletion opens a PR removing a MISSING service. |
 | `GET/POST /api/whitelist`, `DELETE /api/whitelist/{id}` | Exemptions. |
+| `POST /api/actions/batch` | Enforce All / Adopt All over a scope (`all`, `rogue`, `drifted`). |
+| `GET/PUT /api/settings` | Read and change runtime settings. |
+| `POST /api/buffer/{id}/revoke` | Close the adoption pull request and drop the entry from the buffer. |
 | `GET /api/audit`, `/api/events`, `/api/buffer`, `/api/health`, `POST /api/reconcile` | Data and a manual refresh. |
 
 ## 🛠️ Development workflow

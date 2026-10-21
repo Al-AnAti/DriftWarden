@@ -58,6 +58,18 @@ class StateStore(Protocol):
         """Delete an exemption by id."""
         ...
 
+    def list_settings(self) -> dict[str, str]:
+        """Operator setting overrides."""
+        ...
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Persist a setting override."""
+        ...
+
+    def delete_setting(self, key: str) -> None:
+        """Remove a setting override."""
+        ...
+
     def record_drift_event(
         self,
         *,

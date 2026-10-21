@@ -453,3 +453,174 @@ async def test_adopt_deletion_opens_pr_and_clears_when_service_disappears(
         assert store.pending_history()[0][1] == "baseline_updated"
     finally:
         await reconciler.stop()
+
+
+async def test_revoke_adoption_closes_pr_and_restores_status(
+    monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, rogue_container: LiveContainer
+) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container]
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        await reconciler.adopt("rogue-db")
+        entry = reconciler.pending[0]
+        with pytest.raises(DriftWardenError):
+            await reconciler.revoke_adoption(entry.id + 99)
+        result = await reconciler.revoke_adoption(entry.id)
+        assert result.ok and "closed" in result.message
+        assert github.closed == [
+            (1, "Adoption cancelled by the operator from DriftWarden; closing without merging.")
+        ]
+        await asyncio.sleep(0.05)
+        assert reconciler.pending == []
+        assert store.pending_history()[0][1] == "revoked"
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is DriftStatus.ROGUE
+        assert AuditAction.ADOPTION_REVOKED in [row.action for row in store.list_audit()]
+    finally:
+        await reconciler.stop()
+
+
+async def test_unreachable_pr_expires_after_safety_ttl(
+    monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, rogue_container: LiveContainer
+) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    monkeypatch.setenv("ADOPTION_BUFFER_TTL_SECONDS", "1")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container]
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        await reconciler.adopt("rogue-db")
+        github.pull_state_error = True
+        await reconciler.poll_pull_requests()
+        await reconciler.reconcile("test")
+        assert len(reconciler.pending) == 1  # unreachable, but not for long enough
+        reconciler._pr_unreachable_since[reconciler.pending[0].id] -= 5
+        await reconciler.reconcile("test")
+        assert reconciler.pending == []
+        assert store.pending_history()[0][1] == "expired"
+    finally:
+        await reconciler.stop()
+
+
+async def test_batch_enforce_and_adopt(
+    monkeypatch: pytest.MonkeyPatch,
+    fixture_yaml: str,
+    rogue_container: LiveContainer,
+    drifted_cache: LiveContainer,
+) -> None:
+    from shared.models import BatchRequest
+
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container, drifted_cache]  # web MISSING
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        result = await reconciler.batch(BatchRequest(operation="adopt", scope="rogue"))
+        assert result.succeeded == 1 and result.failed == 0
+        assert github.pulls[-1]["service"] == "rogue-db"
+
+        await asyncio.sleep(0.05)
+        await reconciler.reconcile("test")  # rogue-db is buffered now and leaves the scope
+        result = await reconciler.batch(BatchRequest(operation="adopt", scope="all"))
+        assert {r.target for r in result.results} == {"infrastructure-test-cache-1", "web"}
+        assert {p["service"] for p in github.pulls[1:]} == {"cache", "web"}
+
+        result = await reconciler.batch(BatchRequest(operation="enforce", scope="drifted"))
+        assert result.results == []  # cache is buffered now, nothing drifted in scope
+        audit = [row for row in store.list_audit() if row.action is AuditAction.BATCH_REQUESTED]
+        assert audit[0].target == "enforce:drifted"
+    finally:
+        await reconciler.stop()
+
+
+async def test_batch_enforce_kills_and_recreates(
+    started: tuple[Reconciler, Store, FakeWatcher],
+    rogue_container: LiveContainer,
+    drifted_cache: LiveContainer,
+) -> None:
+    from shared.models import BatchRequest
+
+    reconciler, _, watcher = started
+    watcher.containers = [rogue_container, drifted_cache]
+    await reconciler.reconcile("test")
+    result = await reconciler.batch(BatchRequest(operation="enforce", scope="all"))
+    assert result.succeeded == 3 and result.failed == 0
+    assert rogue_container.id in watcher.removed
+    assert sorted(r[0] for r in watcher.recreated) == ["cache", "web"]
+
+
+async def test_settings_change_live_with_confirmation_and_persist(
+    settings: WardenSettings, web_container: LiveContainer
+) -> None:
+    from shared.exceptions import ConfigurationError
+    from shared.models import SettingUpdate
+
+    watcher = FakeWatcher(settings)
+    watcher.containers = [web_container]
+    reconciler, store = build(settings, watcher)
+    await reconciler.start()
+    try:
+        views = {v.key: v for v in reconciler.setting_views()}
+        assert views["warden_mode"].value == "observe" and not views["warden_mode"].overridden
+        with pytest.raises(ConfigurationError):
+            await reconciler.apply_setting(SettingUpdate(key="warden_mode", value="enforce"))
+        with pytest.raises(ConfigurationError):
+            await reconciler.apply_setting(SettingUpdate(key="github_pat", value="x"))
+        with pytest.raises(ConfigurationError):
+            await reconciler.apply_setting(
+                SettingUpdate(key="baseline_poll_interval_seconds", value="abc")
+            )
+        assert reconciler.settings.warden_mode == "observe"
+
+        view = await reconciler.apply_setting(
+            SettingUpdate(key="warden_mode", value="enforce", confirmation="ENABLE AUTONOMOUS")
+        )
+        assert view.value == "enforce" and view.overridden
+        assert reconciler.settings.enforce and reconciler.projector.mode == "enforce"
+        assert reconciler._baseline_changed_at is not None  # grace window re-armed on switch
+        view = await reconciler.apply_setting(
+            SettingUpdate(key="enforcement_grace_seconds", value="45")
+        )
+        assert view.value == "45" and reconciler.settings.enforcement_grace_seconds == 45
+        assert store.list_settings() == {
+            "warden_mode": "enforce",
+            "enforcement_grace_seconds": "45",
+        }
+        assert AuditAction.SETTINGS_CHANGED in [row.action for row in store.list_audit()]
+
+        # Back to the environment default removes the override.
+        await reconciler.apply_setting(SettingUpdate(key="warden_mode", value="observe"))
+        assert "warden_mode" not in store.list_settings()
+    finally:
+        await reconciler.stop()
+
+    # Overrides are re-applied on the next start, without re-confirmation.
+    reconciler2, _ = build(settings, FakeWatcher(settings))
+    await reconciler2.start()
+    try:
+        assert reconciler2.settings.enforcement_grace_seconds == 45
+        assert {v.key for v in reconciler2.setting_views() if v.overridden} == {
+            "enforcement_grace_seconds"
+        }
+    finally:
+        await reconciler2.stop()

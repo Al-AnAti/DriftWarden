@@ -20,9 +20,11 @@
                 &middot; <span id="live-indicator" class="text-slate-500">connecting&hellip;</span>
             </p>
         </div>
-        <button onclick="wardenReconcile()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow">
-            🔄 Reconcile now
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+            <button onclick="wardenBatch('enforce')" class="btn-lg btn-rose text-sm">[ Enforce All ]</button>
+            <button onclick="wardenBatch('adopt')" class="btn-lg btn-emerald text-sm">[ Adopt All ]</button>
+            <button onclick="wardenReconcile()" class="btn-lg btn-ghost text-sm">🔄 Reconcile now</button>
+        </div>
     </div>
 
     <div id="counters" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">

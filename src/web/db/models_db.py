@@ -82,3 +82,13 @@ class DriftEventRow(Base):
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class SettingOverrideRow(Base):
+    """A runtime setting changed by an operator; takes precedence over the environment."""
+
+    __tablename__ = "setting_overrides"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

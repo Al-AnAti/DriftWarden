@@ -129,6 +129,15 @@ class AuditAction(str, Enum):
     ENGINE_STARTED = "engine_started"
     """The reconciliation engine finished its startup pass."""
 
+    ADOPTION_REVOKED = "adoption_revoked"
+    """An operator revoked a buffered adoption; its pull request was closed."""
+
+    SETTINGS_CHANGED = "settings_changed"
+    """An operator changed a runtime setting from the Cluster Config page."""
+
+    BATCH_REQUESTED = "batch_requested"
+    """An operator ran Enforce All or Adopt All over a scope of workloads."""
+
 
 class WhitelistTargetType(str, Enum):
     """Kinds of entity an operator can exempt from drift evaluation."""

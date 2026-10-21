@@ -53,6 +53,7 @@ class StateProjector:
         )
         self._subscribers: set[asyncio.Queue[str]] = set()
         self.version = 0
+        self.mode = mode
 
     @property
     def snapshot(self) -> HostSnapshot:
@@ -80,13 +81,38 @@ class StateProjector:
                 changed.append((record, before.drift_status))
         return changed
 
-    def publish(self, snapshot: HostSnapshot) -> None:
-        """Replace the current snapshot and notify every subscriber."""
+    def publish(
+        self,
+        snapshot: HostSnapshot,
+        transitions: list[tuple[DriftRecord, DriftStatus | None]] | None = None,
+    ) -> None:
+        """Replace the current snapshot and notify every subscriber.
+
+        Args:
+            snapshot: The new snapshot.
+            transitions: Status changes since the previous snapshot, pushed to
+                subscribers so the UI can toast them.
+        """
         self._snapshot = snapshot
         self.version += 1
         if not self._subscribers:
             return
-        message = json.dumps({"version": self.version, "snapshot": snapshot_payload(snapshot)})
+        message = json.dumps(
+            {
+                "version": self.version,
+                "snapshot": snapshot_payload(snapshot),
+                "transitions": [
+                    {
+                        "ref": record.ref,
+                        "display_name": record.display_name or record.ref,
+                        "status": record.drift_status.value,
+                        "previous": previous.value if previous else None,
+                        "message": record.message,
+                    }
+                    for record, previous in (transitions or [])
+                ],
+            }
+        )
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(message)

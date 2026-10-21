@@ -5,7 +5,7 @@ engine/web boundary, the database or the HTTP API is a Pydantic model.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -422,3 +422,88 @@ class ActionResult(BaseModel):
     target: str = Field(min_length=1)
     message: str = ""
     pr_url: str | None = None
+
+
+class SettingView(BaseModel):
+    """One operator-editable runtime setting as shown on Cluster Config.
+
+    Attributes:
+        key: Settings attribute name (``warden_mode`` ...).
+        env: Environment variable name.
+        label: Human label.
+        kind: ``mode``, ``int``, ``float`` or ``text``; drives the input widget.
+        value: Effective value rendered as text.
+        default: Value from the environment or built-in default, as text.
+        overridden: Whether a SQLite override currently replaces the environment value.
+        help: Short explanation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1)
+    env: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    value: str
+    default: str
+    overridden: bool = False
+    help: str = ""
+
+
+class SettingUpdate(BaseModel):
+    """Request to change one runtime setting.
+
+    Attributes:
+        key: Settings attribute name.
+        value: New value as text (validated by ``WardenSettings``).
+        confirmation: Required phrase when switching ``warden_mode`` to ``enforce``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=64)
+    value: str = Field(max_length=1000)
+    confirmation: str | None = Field(default=None, max_length=64)
+
+
+class BatchRequest(BaseModel):
+    """Request to run one operation over a scope of workloads.
+
+    Attributes:
+        operation: ``enforce`` (kill rogue, recreate drifted/missing) or ``adopt``
+            (open pull requests: adopt rogue/drifted, delete missing).
+        scope: ``all``, ``rogue`` or ``drifted``.
+        note: Optional note for adoption pull requests.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["enforce", "adopt"]
+    scope: Literal["all", "rogue", "drifted"] = "all"
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class BatchResult(BaseModel):
+    """Outcome of a batch operation.
+
+    Attributes:
+        operation: What ran.
+        scope: Which workloads were targeted.
+        results: One result per targeted entry, in execution order.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: str = Field(min_length=1)
+    scope: str = Field(min_length=1)
+    results: list[ActionResult] = Field(default_factory=list)
+
+    @property
+    def succeeded(self) -> int:
+        """Number of successful actions."""
+        return sum(1 for r in self.results if r.ok)
+
+    @property
+    def failed(self) -> int:
+        """Number of failed actions."""
+        return sum(1 for r in self.results if not r.ok)

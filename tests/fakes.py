@@ -113,6 +113,11 @@ class FakeGitHub:
         self.mutated: str | None = None
         self.pr_states: dict[int, str] = {}
         self.pull_state_error = False
+        self.closed: list[tuple[int, str]] = []
+
+    def close_pull(self, number: int, comment: str) -> None:
+        self.closed.append((number, comment))
+        self.pr_states[number] = "closed"
 
     def pull_state(self, number: int) -> str:
         if self.pull_state_error:

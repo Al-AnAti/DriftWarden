@@ -15,7 +15,7 @@ endif
 
 export PYTHONPATH = src
 
-.PHONY: install install-dev format lint typecheck test coverage start check clean demo-up demo-drift demo-down
+.PHONY: install install-dev format lint typecheck test coverage start check clean reset-logs demo-up demo-drift demo-down
 
 # ------------------------------------------
 # Setup & Dependency Management
@@ -71,6 +71,10 @@ start:
 
 clean:
 	$(BASH_CMD) scripts/clean.sh
+
+reset-logs:
+	python -c "import sqlite3; c = sqlite3.connect('warden.db'); c.execute('DELETE FROM drift_events'); c.execute('DELETE FROM audit_log'); c.commit(); c.close()"
+	@echo "Audit and drift log history cleared."
 
 # ------------------------------------------
 # Final Presentation Demo Runners

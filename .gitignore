@@ -6,8 +6,11 @@
 # 2. Local State Buffer & Databases
 # Prevents committing the live SQLite database used for pending_adoptions
 *.db
+*.db-*
 *.sqlite
 *.sqlite3
+warden.db*
+sentinel.db*
 
 # 3. Python Virtual Environments
 venv/

@@ -287,26 +287,80 @@ async def test_adopt_opens_pr_buffers_and_clears_on_baseline_change(
         await reconciler.stop()
 
 
-async def test_pending_ttl_expiry(
+async def test_buffer_follows_pull_request_state(
     monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, rogue_container: LiveContainer
 ) -> None:
     monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
     monkeypatch.setenv("GITHUB_PAT", "ghp_test")
     monkeypatch.setenv("TARGET_REPO", "owner/infra")
     monkeypatch.setenv("TARGET_BRANCH", "main")
-    monkeypatch.setenv("ADOPTION_BUFFER_TTL_SECONDS", "0")
+    monkeypatch.setenv("ADOPTION_BUFFER_TTL_SECONDS", "0")  # TTL must not matter with a PR
     settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
     watcher = FakeWatcher(settings)
     watcher.containers = [rogue_container]
-    reconciler, store = build(settings, watcher, FakeGitHub(fixture_yaml))
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        result = await reconciler.adopt("rogue-db")
+        assert result.pr_url
+        body = github.pulls[0]["body"]
+        assert body.startswith("## DriftWarden Reverse-GitOps adoption")
+        assert "**State:** ROGUE" in body and "**Finding:**" not in body
+        assert "rogue process 'rogue-db'" in body.split("**State:** ROGUE")[1].splitlines()[1]
+        await asyncio.sleep(0.05)
+        await reconciler.reconcile("test")
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is DriftStatus.PENDING_ADOPTION
+
+        github.pull_state_error = True  # GitHub hiccup: stay buffered
+        await reconciler.poll_pull_requests()
+        assert len(reconciler.pending) == 1
+        github.pull_state_error = False
+        await reconciler.poll_pull_requests()  # still open: stay buffered
+        assert len(reconciler.pending) == 1 and reconciler.pending[0].pr_state == "open"
+
+        github.pr_states[1] = "closed"
+        await reconciler.poll_pull_requests()
+        await asyncio.sleep(0.05)
+        assert reconciler.pending == []
+        assert store.pending_history()[0][1] == "pr_closed"
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is DriftStatus.ROGUE
+        actions = [row.action for row in store.list_audit()]
+        assert AuditAction.ADOPTION_CLOSED in actions
+        assert AuditAction.ADOPTION_EXPIRED not in actions
+    finally:
+        await reconciler.stop()
+
+
+async def test_merged_pull_request_refreshes_baseline_and_clears_buffer(
+    monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, rogue_container: LiveContainer
+) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container]
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
     await reconciler.start()
     try:
         await reconciler.adopt("rogue-db")
-        await asyncio.sleep(0.05)
-        await reconciler.reconcile("test")
+        github.content = github.mutated or ""
+        github.sha = "sha-merged"
+        github.pr_states[1] = "merged"
+        await reconciler.poll_pull_requests()
+        await asyncio.sleep(0.1)
         assert reconciler.pending == []
-        assert reconciler.projector.snapshot.find("rogue-db").drift_status is DriftStatus.ROGUE  # type: ignore[union-attr]
-        assert AuditAction.ADOPTION_EXPIRED in [row.action for row in store.list_audit()]
+        assert store.pending_history()[0][1] == "baseline_updated"
+        actions = [row.action for row in store.list_audit()]
+        assert AuditAction.ADOPTION_MERGED in actions and AuditAction.ADOPTION_CLEARED in actions
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is not DriftStatus.PENDING_ADOPTION
+        assert record.service_name == "rogue-db"  # now declared in the merged baseline
     finally:
         await reconciler.stop()
 

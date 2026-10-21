@@ -141,6 +141,7 @@ class Reconciler:
             asyncio.create_task(self._event_loop(), name="event-consumer"),
             asyncio.create_task(self._baseline_loop(), name="baseline-poller"),
             asyncio.create_task(self._sweep_loop(), name="sweep"),
+            asyncio.create_task(self._pull_request_loop(), name="pull-requests"),
         ]
         logger.info("Reconciler started in {} mode", self.settings.warden_mode)
 
@@ -326,6 +327,62 @@ class Reconciler:
             except Exception as exc:  # never let the poller die
                 logger.exception("Baseline poll crashed: {}", exc)
 
+    async def _pull_request_loop(self) -> None:
+        """Follow the pull requests behind buffered adoptions."""
+        while not self._stop.is_set():
+            await asyncio.sleep(self.settings.baseline_poll_interval_seconds)
+            try:
+                await self.poll_pull_requests()
+            except Exception as exc:
+                logger.exception("Pull request poll crashed: {}", exc)
+
+    async def poll_pull_requests(self) -> None:
+        """Clear buffer entries whose PR was closed; re-fetch the baseline when one merged.
+
+        An entry stays ``PENDING_ADOPTION`` for as long as its pull request is open,
+        however long the review takes. GitHub errors leave the entry untouched.
+        """
+        if self.github is None or not self._pending:
+            return
+        merged = False
+        for pending in list(self._pending.values()):
+            if pending.pr_number is None:
+                continue
+            try:
+                state = await asyncio.to_thread(self.github.pull_state, pending.pr_number)
+            except GitBaselineFetchError as exc:
+                logger.warning("Cannot check PR #{}: {}", pending.pr_number, exc)
+                continue
+            if state == pending.pr_state:
+                continue
+            await asyncio.to_thread(self.store.set_pending_state, pending.id, state)
+            self._pending[pending.container_id] = pending.model_copy(update={"pr_state": state})
+            if state == "merged":
+                merged = True
+                await asyncio.to_thread(
+                    self.store.record_audit,
+                    AuditAction.ADOPTION_MERGED,
+                    pending.container_name,
+                    f"PR #{pending.pr_number} merged; refreshing baseline",
+                )
+            elif state == "closed":
+                await asyncio.to_thread(self.store.clear_pending, pending.id, "pr_closed")
+                await asyncio.to_thread(
+                    self.store.record_audit,
+                    AuditAction.ADOPTION_CLOSED,
+                    pending.container_name,
+                    f"PR #{pending.pr_number} closed without merging",
+                )
+                self._pending.pop(pending.container_id, None)
+                self.schedule_reconcile("pr-closed")
+        if merged and not await self.refresh_baseline(force=True):
+            # Merged but the file content is unchanged (e.g. the PR was a no-op): clear now.
+            for pending in list(self._pending.values()):
+                if pending.pr_state == "merged":
+                    await asyncio.to_thread(self.store.clear_pending, pending.id, "pr_merged")
+                    self._pending.pop(pending.container_id, None)
+            self.schedule_reconcile("pr-merged")
+
     async def _sweep_loop(self) -> None:
         while not self._stop.is_set():
             await asyncio.sleep(self.settings.reconcile_sweep_interval_seconds)
@@ -496,9 +553,14 @@ class Reconciler:
                 )
 
     async def _expire_pending(self) -> None:
+        """Fallback TTL for entries that have no pull request to follow.
+
+        Entries backed by a pull request never expire here; ``poll_pull_requests``
+        decides their fate from the PR state.
+        """
         now = datetime.now(timezone.utc)
         for pending in list(self._pending.values()):
-            if pending.expires_at <= now:
+            if pending.pr_number is None and pending.expires_at <= now:
                 await asyncio.to_thread(self.store.clear_pending, pending.id, "expired")
                 await asyncio.to_thread(
                     self.store.record_audit,
@@ -778,7 +840,8 @@ class Reconciler:
             "",
             f"**Host:** `{self.settings.hostname}`  ",
             f"**Service:** `{service_name}`  ",
-            f"**Finding:** MISSING: {record.message}",
+            "**State:** MISSING  ",
+            record.message,
             "",
             f"Removes the `{service_name}` service block so the baseline matches the host, "
             "where no instance of it is running.",
@@ -881,7 +944,8 @@ def _pr_body(
         f"**Host:** `{hostname}`  ",
         f"**Container:** `{container.name}` (`{container.short_id}`)  ",
         f"**Image:** `{container.image}`  ",
-        f"**Finding:** {record.drift_status.value.upper()}: {record.message}",
+        f"**State:** {record.drift_status.value.upper()}  ",
+        record.message,
         "",
     ]
     if is_update and record.changed_fields:

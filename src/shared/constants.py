@@ -94,7 +94,13 @@ class AuditAction(str, Enum):
     """A pending adoption was cleared because the baseline now declares the service."""
 
     ADOPTION_EXPIRED = "adoption_expired"
-    """A pending adoption reached its TTL before the baseline declared the service."""
+    """A pending adoption without a pull request reached its fallback TTL."""
+
+    ADOPTION_MERGED = "adoption_merged"
+    """The adoption pull request was merged; the baseline is being re-fetched."""
+
+    ADOPTION_CLOSED = "adoption_closed"
+    """The adoption pull request was closed without merging; the entry left the buffer."""
 
     BASELINE_FETCHED = "baseline_fetched"
     """The declarative baseline was fetched successfully."""

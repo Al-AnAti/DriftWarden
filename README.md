@@ -11,7 +11,7 @@ Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker ru
 * **Two remediation paths.**
   * **Enforce / Revert** recreates a `DRIFTED` or `MISSING` service from the baseline through the Docker SDK (`containers.run`, never `docker compose`), and stops and removes `ROGUE` containers.
   * **Adopt (Reverse-GitOps)** reverse-engineers the live container into a comment-preserving YAML mutation and opens a pull request on the infrastructure repository. Environment values are never committed; keys become `${KEY}` placeholders.
-* **State buffer.** Adopted containers stay `PENDING_ADOPTION`, exempt from enforcement, until the merged baseline is ingested or the TTL expires, whichever comes first.
+* **State buffer.** Adopted containers stay `PENDING_ADOPTION`, exempt from enforcement, for as long as their pull request is open. A merge triggers a baseline re-fetch that clears the entry (the workload becomes `MATCHED`); closing the PR without merging returns it to `ROGUE` or `DRIFTED`.
 * **Whitelist.** Operators can exempt a container or an entire foreign Compose project from the dashboard; the exemption lives in SQLite.
 
 ### Drift states
@@ -102,7 +102,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `DRIFT_DEBOUNCE_SECONDS` | `2` | Single global quiet window that coalesces Docker events into one reconcile. |
 | `RECONCILE_SWEEP_INTERVAL_SECONDS` | `60` | Periodic full reconcile for events missed during reconnects. |
 | `ENFORCEMENT_GRACE_SECONDS` | `30` | Enforcement is suppressed this long after every baseline change, and the baseline is re-fetched before any destructive action. |
-| `ADOPTION_BUFFER_TTL_SECONDS` | `180` | Safety timeout for the pending-adoption buffer. |
+| `ADOPTION_BUFFER_TTL_SECONDS` | `180` | Fallback timeout only for buffer entries that have no pull request to follow. |
 | `EXCLUDED_NAME_PREFIXES` | `warden-,driftwarden,k8s_` | Containers never evaluated. |
 | `DOCKER_SOCKET_PATH` / `DOCKER_BASE_URL` | `/var/run/docker.sock` / unset | Socket path, or an explicit `npipe://` / `tcp://` URL; otherwise `docker.from_env()`. |
 | `DATABASE_URL` | `sqlite:///./warden.db` | Audit log, buffer, whitelist and drift events (WAL mode). |

@@ -33,6 +33,7 @@ def _pending_from_row(row: PendingAdoptionRow) -> PendingAdoption:
     return PendingAdoption(
         id=row.id,
         kind=row.kind or "adopt",
+        pr_state=row.pr_state or "open",
         container_id=row.container_id,
         container_name=row.container_name,
         service_name=row.service_name,
@@ -170,6 +171,18 @@ class Store:
                 select(PendingAdoptionRow).order_by(PendingAdoptionRow.id.desc()).limit(limit)
             ).all()
         return [(_pending_from_row(row), row.outcome) for row in rows]
+
+    def set_pending_state(self, entry_id: int, pr_state: str) -> None:
+        """Record the last observed pull request state of a buffer entry."""
+        try:
+            with self._db.write() as session:
+                session.execute(
+                    update(PendingAdoptionRow)
+                    .where(PendingAdoptionRow.id == entry_id)
+                    .values(pr_state=pr_state)
+                )
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot update adoption {entry_id}: {exc}") from exc
 
     def clear_pending(self, entry_id: int, outcome: str) -> None:
         """Close a buffer entry with an outcome (``baseline_updated``, ``expired`` ...)."""

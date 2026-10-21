@@ -198,6 +198,28 @@ class GitHubClient:
         logger.info("Fetched baseline {}@{} sha={}", self.path, self.branch, sha[:12])
         return FetchedBaseline(content=content, sha=sha, etag=new_etag)
 
+    def pull_state(self, number: int) -> str:
+        """Current state of a pull request.
+
+        Args:
+            number: Pull request number.
+
+        Returns:
+            ``open``, ``merged`` or ``closed``.
+
+        Raises:
+            GitBaselineFetchError: If GitHub cannot be queried.
+        """
+        try:
+            pull = self._repo().get_pull(number)
+        except GithubException as exc:
+            raise GitBaselineFetchError(f"Cannot read PR #{number}: {_describe(exc)}") from exc
+        except Exception as exc:
+            raise GitBaselineFetchError(f"Cannot read PR #{number}: {exc}") from exc
+        if bool(pull.merged):
+            return "merged"
+        return "open" if str(pull.state) == "open" else "closed"
+
     def find_open_adoption_pr(self, container_name: str) -> AdoptionPullRequest | None:
         """Find an open adoption pull request for a container, if one exists.
 

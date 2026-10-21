@@ -36,6 +36,10 @@ class StateStore(Protocol):
         """Buffer entries that are neither cleared nor expired."""
         ...
 
+    def set_pending_state(self, entry_id: int, pr_state: str) -> None:
+        """Record the last observed pull request state of a buffer entry."""
+        ...
+
     def clear_pending(self, entry_id: int, outcome: str) -> None:
         """Close a buffer entry with an outcome."""
         ...

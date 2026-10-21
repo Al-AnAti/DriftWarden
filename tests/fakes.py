@@ -111,6 +111,15 @@ class FakeGitHub:
         self.fetches = 0
         self.pulls: list[dict[str, Any]] = []
         self.mutated: str | None = None
+        self.pr_states: dict[int, str] = {}
+        self.pull_state_error = False
+
+    def pull_state(self, number: int) -> str:
+        if self.pull_state_error:
+            from shared.exceptions import GitBaselineFetchError
+
+            raise GitBaselineFetchError("503 unavailable")
+        return self.pr_states.get(number, "open")
 
     def fetch_baseline(self, etag: str | None = None) -> FetchedBaseline | None:
         self.fetches += 1

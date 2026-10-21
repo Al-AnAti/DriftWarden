@@ -7,13 +7,14 @@
     <div>
         <h1 class="text-2xl font-bold tracking-tight">State Buffer</h1>
         <p class="text-sm text-slate-400 mt-1">
-            Containers adopted via pull request stay here, exempt from enforcement, until the merged baseline is ingested or
-            <span class="font-mono">ADOPTION_BUFFER_TTL_SECONDS={{ settings.adoption_buffer_ttl_seconds }}</span> elapses, whichever comes first.
+            Containers adopted via pull request stay here, exempt from enforcement, for as long as their pull request is open.
+            A merge triggers a baseline re-fetch that clears the entry; closing the PR without merging returns the workload to its real state.
+            <span class="font-mono">ADOPTION_BUFFER_TTL_SECONDS={{ settings.adoption_buffer_ttl_seconds }}</span> is only a fallback for entries with no pull request.
         </p>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-        {% set steps = [("1. Drift triggered", "Event caught on the Docker socket", "amber"), ("2. Operator clicks Adopt", "YAML synthesised, branch cut, PR opened", "sky"), ("3. Buffered", "Alert suppressed, enforcement skipped", "orange"), ("4. Baseline ingested", "Removed from buffer, alert off", "emerald")] %}
+        {% set steps = [("1. Drift triggered", "Event caught on the Docker socket", "amber"), ("2. Operator clicks Adopt", "YAML synthesised, branch cut, PR opened", "sky"), ("3. Buffered while PR is open", "Alert suppressed, enforcement skipped", "orange"), ("4. PR merged", "Baseline re-fetched, entry cleared, alert off", "emerald")] %}
         {% for title, sub, tone in steps %}
         <div class="rounded-xl border border-{{ tone }}-700/60 bg-slate-900 p-4">
             <p class="font-semibold">{{ title }}</p>
@@ -26,19 +27,20 @@
         <header class="px-6 py-4 border-b border-slate-800"><h2 class="font-semibold">Active entries ({{ pending | length }})</h2></header>
         <table class="min-w-full text-sm">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-6 py-2">Container</th><th class="text-left px-6 py-2">Service</th><th class="text-left px-6 py-2">Pull request</th><th class="text-left px-6 py-2">Created (UTC)</th><th class="text-left px-6 py-2">Expires (UTC)</th></tr>
+                <tr><th class="text-left px-6 py-2">Entry</th><th class="text-left px-6 py-2">Kind</th><th class="text-left px-6 py-2">Service</th><th class="text-left px-6 py-2">Pull request</th><th class="text-left px-6 py-2">PR state</th><th class="text-left px-6 py-2">Created (UTC)</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800 font-mono text-xs">
                 {% for p in pending %}
                 <tr>
-                    <td class="px-6 py-2"><a class="text-indigo-300 hover:underline" href="/diff/{{ p.container_name }}">{{ p.container_name }}</a> <span class="text-slate-500">{{ p.container_id[:12] }}</span></td>
+                    <td class="px-6 py-2"><a class="text-indigo-300 hover:underline" href="/diff/{{ p.container_name }}">{{ p.container_name }}</a> {% if p.kind != 'remove' %}<span class="text-slate-500">{{ p.container_id[:12] }}</span>{% endif %}</td>
+                    <td class="px-6 py-2"><span class="badge tone-slate">{{ 'remove service' if p.kind == 'remove' else 'adopt' }}</span></td>
                     <td class="px-6 py-2">{{ p.service_name }}</td>
                     <td class="px-6 py-2">{% if p.pr_url %}<a class="text-emerald-300 hover:underline" target="_blank" href="{{ p.pr_url }}">#{{ p.pr_number }}</a> <span class="text-slate-500">{{ p.branch }}</span>{% else %}—{% endif %}</td>
+                    <td class="px-6 py-2 {% if p.pr_state == 'merged' %}text-emerald-300{% elif p.pr_state == 'closed' %}text-rose-300{% else %}text-violet-300{% endif %}">{{ p.pr_state }}</td>
                     <td class="px-6 py-2 text-slate-400">{{ p.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-6 py-2 text-slate-400">{{ p.expires_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">Nothing is buffered.</td></tr>
+                <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">Nothing is buffered.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -48,19 +50,20 @@
         <header class="px-6 py-4 border-b border-slate-800"><h2 class="font-semibold">History</h2></header>
         <table class="min-w-full text-sm">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-6 py-2">Container</th><th class="text-left px-6 py-2">Service</th><th class="text-left px-6 py-2">PR</th><th class="text-left px-6 py-2">Created (UTC)</th><th class="text-left px-6 py-2">Outcome</th></tr>
+                <tr><th class="text-left px-6 py-2">Entry</th><th class="text-left px-6 py-2">Kind</th><th class="text-left px-6 py-2">Service</th><th class="text-left px-6 py-2">PR</th><th class="text-left px-6 py-2">Created (UTC)</th><th class="text-left px-6 py-2">Outcome</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800 font-mono text-xs">
                 {% for p, outcome in history %}
                 <tr>
                     <td class="px-6 py-2">{{ p.container_name }}</td>
+                    <td class="px-6 py-2">{{ 'remove service' if p.kind == 'remove' else 'adopt' }}</td>
                     <td class="px-6 py-2">{{ p.service_name }}</td>
-                    <td class="px-6 py-2">{% if p.pr_url %}<a class="text-indigo-300 hover:underline" target="_blank" href="{{ p.pr_url }}">#{{ p.pr_number }}</a>{% else %}—{% endif %}</td>
+                    <td class="px-6 py-2">{% if p.pr_url %}<a class="text-indigo-300 hover:underline" target="_blank" href="{{ p.pr_url }}">#{{ p.pr_number }}</a> <span class="text-slate-500">{{ p.pr_state }}</span>{% else %}—{% endif %}</td>
                     <td class="px-6 py-2 text-slate-400">{{ p.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-6 py-2 {% if outcome == 'baseline_updated' %}text-emerald-300{% elif outcome == 'expired' %}text-amber-300{% elif outcome %}text-slate-400{% else %}text-violet-300{% endif %}">{{ outcome or 'active' }}</td>
+                    <td class="px-6 py-2 {% if outcome in ('baseline_updated', 'pr_merged') %}text-emerald-300{% elif outcome in ('expired', 'pr_closed') %}text-amber-300{% elif outcome %}text-slate-400{% else %}text-violet-300{% endif %}">{{ outcome or 'active' }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No adoptions yet.</td></tr>
+                <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No adoptions yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

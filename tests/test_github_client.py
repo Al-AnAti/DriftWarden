@@ -187,3 +187,33 @@ def test_open_adoption_pr_wraps_github_errors(monkeypatch: pytest.MonkeyPatch) -
         client.open_adoption_pr(
             container_name="x", service_name="x", mutate=lambda t: t, title="t", body="b"
         )
+
+
+class FakePullState:
+    def __init__(self, state: str, merged: bool) -> None:
+        self.state = state
+        self.merged = merged
+
+
+class RepoWithPulls:
+    def __init__(self) -> None:
+        self.pulls = {
+            1: FakePullState("open", False),
+            2: FakePullState("closed", True),
+            3: FakePullState("closed", False),
+        }
+
+    def get_pull(self, number: int) -> FakePullState:
+        if number not in self.pulls:
+            raise GithubException(404, {"message": "Not Found"}, None)
+        return self.pulls[number]
+
+
+def test_pull_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = client_with_repo(monkeypatch, FakeRepo())
+    monkeypatch.setattr(client, "_repo", lambda: RepoWithPulls())
+    assert client.pull_state(1) == "open"
+    assert client.pull_state(2) == "merged"
+    assert client.pull_state(3) == "closed"
+    with pytest.raises(GitBaselineFetchError, match="404"):
+        client.pull_state(9)

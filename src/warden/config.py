@@ -38,7 +38,9 @@ class WardenSettings(BaseSettings):
         docker_event_reconnect_delay: Delay before reconnecting to Docker.
         reconcile_sweep_interval_seconds: Periodic full reconcile interval.
         enforcement_grace_seconds: Enforcement suppression after a baseline change.
-        adoption_buffer_ttl_seconds: Pending-adoption suppression duration.
+        adoption_buffer_ttl_seconds: Fallback buffer TTL for entries with no pull
+            request to follow; entries backed by a PR stay buffered until it is
+            merged or closed.
         excluded_name_prefixes: Container name prefixes never evaluated.
         api_host: Host address used by the control plane.
         api_port: Port used by the control plane.

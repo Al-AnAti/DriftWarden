@@ -48,12 +48,16 @@ class Database:
         with self.engine.begin() as connection:
             rows = connection.exec_driver_sql("PRAGMA table_info(pending_adoptions)").fetchall()
             columns = {str(row[1]) for row in rows}
-            if columns and "kind" not in columns:
-                connection.exec_driver_sql(
-                    "ALTER TABLE pending_adoptions "
-                    "ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'adopt'"
-                )
-                logger.info("Migrated pending_adoptions: added kind column")
+            additions = {
+                "kind": "VARCHAR(16) NOT NULL DEFAULT 'adopt'",
+                "pr_state": "VARCHAR(16) NOT NULL DEFAULT 'open'",
+            }
+            for column, ddl in additions.items():
+                if columns and column not in columns:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE pending_adoptions ADD COLUMN {column} {ddl}"
+                    )
+                    logger.info("Migrated pending_adoptions: added {} column", column)
 
     @contextmanager
     def session(self) -> Iterator[Session]:

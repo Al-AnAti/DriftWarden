@@ -153,3 +153,25 @@ def test_buffer_and_events_endpoints(client: TestClient) -> None:
         DriftStatus.ROGUE.value,
         DriftStatus.DRIFTED.value,
     }
+
+
+def test_diff_page_marks_only_changed_lines_in_a_gutter(client: TestClient) -> None:
+    page = client.get(f"/diff/{PROJECT}-cache-1").text
+    assert '<span class="ln">1</span>' in page
+    assert 'class="line del"' in page and 'class="line add"' in page
+    # The parent key is shared by both panes and must not carry a marker.
+    assert '<span class="code">  labels:</span>' in page
+    assert 'class="line del"><span class="ln">' in page
+
+
+def test_line_diff_targets_children_not_parents() -> None:
+    from web.routes.views import line_diff
+
+    expected = "cache:\n  image: redis:alpine\n  labels:\n    a: '1'\n    b: '2'\n"
+    observed = "cache:\n  image: redis:alpine\n  labels:\n    a: '1'\n    b: '3'\n"
+    left, right = line_diff(expected, observed)
+    assert [(ln.number, ln.sign) for ln in left if ln.sign] == [(5, "-")]
+    assert [(ln.number, ln.sign) for ln in right if ln.sign] == [(5, "+")]
+    assert left[2].text == "  labels:" and left[2].sign == ""
+    rogue_left, rogue_right = line_diff(None, "x:\n  image: y\n")
+    assert rogue_left == [] and [ln.sign for ln in rogue_right] == ["+", "+"]

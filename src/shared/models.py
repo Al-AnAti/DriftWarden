@@ -164,12 +164,14 @@ class PendingAdoption(BaseModel):
         created_at: When the adoption was requested.
         expires_at: When the buffer entry is dropped if the baseline never catches up.
         kind: ``adopt`` (add or sync a service) or ``remove`` (delete a service block).
+        pr_state: Last observed pull request state: ``open``, ``merged`` or ``closed``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: int = Field(ge=1)
     kind: str = "adopt"
+    pr_state: str = "open"
     container_id: str = Field(min_length=1)
     container_name: str = Field(min_length=1)
     service_name: str = Field(min_length=1)
@@ -188,6 +190,8 @@ class DriftRecord(BaseModel):
 
     Attributes:
         ref: URL-safe key: the container name when one exists, else the service name.
+        display_name: Name shown in tables: the live container name, else the baseline's
+            declared ``container_name``, else the service name.
         drift_status: Relationship between the entry and the Git baseline.
         service_name: Baseline service name, when the entry maps to one.
         project: Compose project the container claims to belong to, if any.
@@ -207,6 +211,7 @@ class DriftRecord(BaseModel):
     model_config = ConfigDict(use_enum_values=False, extra="forbid")
 
     ref: str = Field(min_length=1)
+    display_name: str = ""
     drift_status: DriftStatus
     service_name: str | None = None
     project: str | None = None

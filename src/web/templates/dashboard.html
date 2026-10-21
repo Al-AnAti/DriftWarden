@@ -63,7 +63,7 @@
                     <tr class="hover:bg-slate-800/40">
                         <td class="px-6 py-3"><span class="badge tone-{{ status_meta[r.drift_status.value].tone }}">{{ status_meta[r.drift_status.value].label }}</span></td>
                         <td class="px-6 py-3 font-mono">
-                            <a class="text-indigo-300 hover:underline" href="/diff/{{ r.ref }}">{{ r.container_name or '—' }}</a>
+                            <a class="text-indigo-300 hover:underline" href="/diff/{{ r.ref }}">{{ r.display_name or r.container_name or r.service_name }}</a>{% if not r.container_name %}<span class="block text-xs text-slate-500">declared in Git, not running</span>{% endif %}
                             {% if r.container_id %}<span class="block text-xs text-slate-500">{{ r.container_id[:12] }}</span>{% endif %}
                         </td>
                         <td class="px-6 py-3 font-mono text-slate-300">{{ r.service_name or (r.project and ('project: ' ~ r.project)) or '—' }}</td>

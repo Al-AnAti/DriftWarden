@@ -413,6 +413,7 @@ def _rogue_record(
         actions.append("whitelist_project")
     return DriftRecord(
         ref=container.name,
+        display_name=container.name,
         drift_status=DriftStatus.ROGUE,
         service_name=None,
         project=project,
@@ -459,6 +460,7 @@ def _managed_record(
             actions = ["revert", "adopt_deletion"]
         return DriftRecord(
             ref=service.service_name,
+            display_name=service.container_name or service.service_name,
             drift_status=status,
             service_name=service.service_name,
             project=project,
@@ -503,6 +505,7 @@ def _managed_record(
         actions = []
     return DriftRecord(
         ref=container.name,
+        display_name=container.name,
         drift_status=status,
         service_name=service.service_name,
         project=project,

@@ -1,5 +1,7 @@
 """Server-rendered pages: Dashboard, Diff, Events Log, State Buffer, Cluster Config."""
 
+import difflib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,49 @@ OVERALL_META: dict[str, dict[str, str]] = {
     "baseline_unavailable": {"label": "BASELINE_UNAVAILABLE", "tone": "rose"},
 }
 """Headline pill text and colour per overall status."""
+
+
+@dataclass(slots=True, frozen=True)
+class DiffLine:
+    """One rendered line of a diff pane.
+
+    Attributes:
+        number: 1-based line number within its own pane.
+        sign: ``+`` for lines only in the observed state, ``-`` for lines only in
+            the baseline, empty for lines present on both sides.
+        text: The YAML line, indentation intact.
+    """
+
+    number: int
+    sign: str
+    text: str
+
+
+def line_diff(expected: str | None, observed: str | None) -> tuple[list[DiffLine], list[DiffLine]]:
+    """Line-level comparison of the two YAML panes.
+
+    Only lines that genuinely differ get a marker, so a changed ``warden.repo``
+    label is flagged without flagging its ``labels:`` parent.
+
+    Args:
+        expected: Baseline YAML, or ``None`` when the service is not declared.
+        observed: Live YAML, or ``None`` when nothing is running.
+
+    Returns:
+        The baseline pane lines and the live pane lines.
+    """
+    left = expected.rstrip().splitlines() if expected else []
+    right = observed.rstrip().splitlines() if observed else []
+    matcher = difflib.SequenceMatcher(a=left, b=right, autojunk=False)
+    left_out: list[DiffLine] = []
+    right_out: list[DiffLine] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        for index in range(i1, i2):
+            left_out.append(DiffLine(index + 1, "" if tag == "equal" else "-", left[index]))
+        for index in range(j1, j2):
+            right_out.append(DiffLine(index + 1, "" if tag == "equal" else "+", right[index]))
+    return left_out, right_out
+
 
 STATUS_ORDER = [
     DriftStatus.ROGUE,
@@ -89,6 +134,9 @@ def diff_page(request: Request, ref: str) -> HTMLResponse:
     context = base_context(request, runtime, "dashboard")
     context["record"] = record
     context["changed_fields"] = set(record.changed_fields)
+    expected_lines, observed_lines = line_diff(record.expected_yaml, record.observed_yaml)
+    context["expected_lines"] = expected_lines
+    context["observed_lines"] = observed_lines
     return templates.TemplateResponse(request, "diff.html", context)
 
 

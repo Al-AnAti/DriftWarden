@@ -319,3 +319,12 @@ def test_observed_yaml_keeps_sibling_keys_at_service_level(
     assert "container_name" not in text
     assert "rogue" not in text.split("MARIADB_ROOT_PASSWORD")[1].splitlines()[0]
     assert "/var/lib/mysql" not in text and "bridge" not in text
+
+
+def test_display_name_falls_back_to_baseline_identity(baseline: Baseline) -> None:
+    baseline.services["cache"].container_name = "pinned-cache"
+    result = evaluate([], context(baseline))
+    by_ref = {r.ref: r for r in result.records}
+    assert by_ref["web"].display_name == "web"
+    assert by_ref["cache"].display_name == "pinned-cache"
+    assert by_ref["web"].container_name is None

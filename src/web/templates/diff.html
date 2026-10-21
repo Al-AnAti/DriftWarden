@@ -2,6 +2,10 @@
 
 {% block title %}{{ record.ref }} &middot; DriftWarden{% endblock %}
 
+{% macro pane(lines, placeholder, placeholder_sign) -%}
+<pre class="code-pane">{% for ln in lines %}<span class="line {% if ln.sign == '-' %}del{% elif ln.sign == '+' %}add{% endif %}"><span class="ln">{{ ln.number }}</span><span class="sign">{{ ln.sign }}</span><span class="code">{{ ln.text }}</span></span>{% else %}<span class="line {% if placeholder_sign == '-' %}del{% else %}add{% endif %}"><span class="ln"></span><span class="sign">{{ placeholder_sign }}</span><span class="code">{{ placeholder }}</span></span>{% endfor %}</pre>
+{%- endmacro %}
+
 {% block content %}
 {% set meta = status_meta[record.drift_status.value] %}
 {% set status = record.drift_status.value %}
@@ -11,7 +15,7 @@
         <a href="/" class="text-slate-500 hover:text-slate-300 text-sm">&larr; Dashboard</a>
         <h1 class="text-2xl font-bold tracking-tight">
             {{ meta.label }}
-            {% if missing or not record.container_name %}service: <span class="font-mono">{{ record.service_name }}</span>{% else %}container: <span class="font-mono">{{ record.container_name }}</span>{% endif %}
+            {% if missing or not record.container_name %}service: <span class="font-mono">{{ record.display_name or record.service_name }}</span>{% else %}container: <span class="font-mono">{{ record.container_name }}</span>{% endif %}
         </h1>
         <span id="diff-status-badge" class="badge tone-{{ meta.tone }}">{{ meta.label }}</span>
         {% if record.project %}<span class="badge tone-slate">project: {{ record.project }}</span>{% endif %}
@@ -27,7 +31,7 @@
         {% endif %}
         {% if record.pending_adoption and record.pending_adoption.pr_url %}
             <a class="underline ml-1" target="_blank" href="{{ record.pending_adoption.pr_url }}">Open PR #{{ record.pending_adoption.pr_number }}</a>
-            &middot; expires {{ record.pending_adoption.expires_at.strftime('%H:%M:%S') }} UTC
+            &middot; PR {{ record.pending_adoption.pr_state }} &middot; buffered until it is merged or closed
         {% endif %}
     </div>
 
@@ -41,11 +45,7 @@
                 {{ snapshot.baseline.branch or snapshot.baseline.source.value }} / {{ snapshot.baseline.path or '' }}
                 {% if snapshot.baseline.sha %}<span class="text-slate-600">@{{ snapshot.baseline.sha[:12] }}</span>{% endif %}
             </div>
-            {% if record.expected_yaml %}
-                <pre class="code-pane">{% for line in record.expected_yaml.rstrip().split('\n') %}<span class="line {% if status == 'drifted' and line.split(':')[0].strip() in changed_fields %}del{% endif %}">{{ line }}</span>{% endfor %}</pre>
-            {% else %}
-                <pre class="code-pane"><span class="line del">- (Service not declared in Git repository)</span></pre>
-            {% endif %}
+            {{ pane(expected_lines, "(Service not declared in Git repository)", "-") }}
         </section>
 
         {% if not missing %}
@@ -57,11 +57,7 @@
             <div class="px-5 py-3 text-xs font-mono text-slate-400 border-b border-slate-800">
                 {% if record.container_name %}container: {{ record.container_name }} <span class="text-slate-600">({{ record.container_id[:12] }}, detected via docker socket)</span>{% else %}no container{% endif %}
             </div>
-            {% if record.observed_yaml %}
-                <pre class="code-pane">{% for line in record.observed_yaml.rstrip().split('\n') %}<span class="line {% if status == 'rogue' %}add{% elif status == 'drifted' and line.split(':')[0].strip() in changed_fields %}add{% endif %}">{{ line }}</span>{% endfor %}</pre>
-            {% else %}
-                <pre class="code-pane"><span class="line del">- (No container running on {{ hostname }})</span></pre>
-            {% endif %}
+            {{ pane(observed_lines, "(No container running on " ~ hostname ~ ")", "-") }}
         </section>
         {% endif %}
     </div>

@@ -153,8 +153,8 @@
         return (
             '<tr class="hover:bg-slate-800/40">' +
             '<td class="px-6 py-3">' + badge(r.drift_status) + "</td>" +
-            '<td class="px-6 py-3 font-mono"><a class="text-indigo-300 hover:underline" href="/diff/' + encodeURIComponent(r.ref) + '">' + esc(r.container_name || "—") + "</a>" +
-            (r.container_id ? '<span class="block text-xs text-slate-500">' + esc(r.container_id.slice(0, 12)) + "</span>" : "") + "</td>" +
+            '<td class="px-6 py-3 font-mono"><a class="text-indigo-300 hover:underline" href="/diff/' + encodeURIComponent(r.ref) + '">' + esc(r.display_name || r.container_name || r.service_name) + "</a>" +
+            (r.container_id ? '<span class="block text-xs text-slate-500">' + esc(r.container_id.slice(0, 12)) + "</span>" : '<span class="block text-xs text-slate-500">declared in Git, not running</span>') + "</td>" +
             '<td class="px-6 py-3 font-mono text-slate-300">' + esc(service) + "</td>" +
             '<td class="px-6 py-3 font-mono text-slate-300">' + esc(r.image || "—") + "</td>" +
             '<td class="px-6 py-3 text-slate-300">' + esc(r.status) + "</td>" +
@@ -325,7 +325,7 @@
         toast(spec.progress(ref), "sky");
         try {
             const result = await post("/api/actions/" + (spec.endpoint || action) + "/" + encodeURIComponent(ref), body);
-            if (result.pr_url) window.open(result.pr_url, "_blank");
+            /* No automatic jump to GitHub: the PR link appears on the entry once it is buffered. */
             if (spec.destructive && W.page === "dashboard" && W.diffRef) {
                 /* On /diff/{name} the target no longer exists under this URL: go home with a toast. */
                 navigatingAway = true;

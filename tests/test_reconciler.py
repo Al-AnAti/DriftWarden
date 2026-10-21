@@ -545,8 +545,10 @@ async def test_batch_enforce_and_adopt(
         assert {r.target for r in result.results} == {"infrastructure-test-cache-1", "web"}
         assert {p["service"] for p in github.pulls[1:]} == {"cache", "web"}
 
+        await asyncio.sleep(0.05)
+        await reconciler.reconcile("test")  # cache is buffered now, nothing drifted in scope
         result = await reconciler.batch(BatchRequest(operation="enforce", scope="drifted"))
-        assert result.results == []  # cache is buffered now, nothing drifted in scope
+        assert result.results == []
         audit = [row for row in store.list_audit() if row.action is AuditAction.BATCH_REQUESTED]
         assert audit[0].target == "enforce:drifted"
     finally:

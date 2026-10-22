@@ -31,6 +31,15 @@ Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker ru
 3. **Managed namespace** (`com.docker.compose.project` equal to the baseline's `name:`, or `COMPOSE_NAMESPACE` when `name:` is absent): map to a service by the `com.docker.compose.service` label, falling back to the `<project>-<service>-<n>` name pattern, then diff.
 4. **Everything else** is `ROGUE`.
 
+## 📚 Documentation
+
+Longer, package-by-package guides live in [`docs/`](docs/):
+
+* [`docs/overview.md`](docs/overview.md) — the project idea, the end-to-end workflow, dependencies, Makefile targets, scripts, tests and CI.
+* [`docs/shared.md`](docs/shared.md) — `src/shared`: enums, exceptions and the Pydantic models that cross every boundary.
+* [`docs/warden.md`](docs/warden.md) — `src/warden`: settings, Compose parsing, Docker access, classification rules, the reconcile loop, enforcement, adoption and the buffer.
+* [`docs/web.md`](docs/web.md) — `src/web`: FastAPI app and lifespan, SQLite tables, pages, JSON API, the SSE stream and `dashboard.js`.
+
 ## 🏗️ Architecture
 
 ```

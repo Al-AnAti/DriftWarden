@@ -27,7 +27,7 @@
         </div>
     </div>
 
-    <div id="counters" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+    <div id="counters" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         {% for key, meta in status_meta.items() %}
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
             <p class="text-xs uppercase tracking-wider text-slate-400">{{ meta.label }}</p>
@@ -77,10 +77,10 @@
                         </td>
                         <td class="px-6 py-3 text-right whitespace-nowrap space-x-1">
                             <a href="/diff/{{ r.ref }}" class="btn btn-ghost">Diff</a>
-                            {% if 'revert' in r.actions %}<button onclick="wardenAction('revert', '{{ r.ref }}')" class="btn btn-rose">{% if r.drift_status.value == 'missing' %}Spin up{% else %}Revert{% endif %}</button>{% endif %}
-                            {% if 'kill' in r.actions %}<button onclick="wardenAction('kill', '{{ r.ref }}')" class="btn btn-rose">Kill</button>{% endif %}
+                            {% if 'revert' in r.actions %}<button onclick="wardenAction('revert', '{{ r.ref }}')" class="btn btn-rose">Enforce</button>{% endif %}
+                            {% if 'kill' in r.actions %}<button onclick="wardenAction('kill', '{{ r.ref }}')" class="btn btn-rose">Enforce</button>{% endif %}
                             {% if 'adopt' in r.actions %}<button onclick="wardenAction('adopt', '{{ r.ref }}')" class="btn btn-emerald">Adopt</button>{% endif %}
-                            {% if 'adopt_deletion' in r.actions %}<button onclick="wardenAction('adopt_deletion', '{{ r.ref }}')" class="btn btn-emerald">Adopt deletion</button>{% endif %}
+                            {% if 'adopt_deletion' in r.actions %}<button onclick="wardenAction('adopt_deletion', '{{ r.ref }}')" class="btn btn-emerald">Adopt</button>{% endif %}
                             {% if 'whitelist' in r.actions %}<button onclick="wardenWhitelist('CONTAINER', '{{ r.container_name }}')" class="btn btn-ghost">Whitelist</button>{% endif %}
                             {% if r.pending_adoption and r.pending_adoption.pr_url %}<a href="{{ r.pending_adoption.pr_url }}" target="_blank" class="btn btn-violet">PR #{{ r.pending_adoption.pr_number }}</a>{% endif %}
                         </td>

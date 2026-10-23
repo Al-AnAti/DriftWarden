@@ -61,6 +61,7 @@ def test_state_and_health(client: TestClient) -> None:
         "missing": 0,
         "drifted": 1,
         "pending_adoption": 0,
+        "awaiting_restart": 0,
     }
     assert "raw_yaml" not in state["baseline"]
     detail = client.get(f"/api/containers/{PROJECT}-cache-1").json()
@@ -118,11 +119,12 @@ def test_missing_diff_page_is_simplified(client: TestClient, fake_watcher: FakeW
     response = client.post("/api/actions/adopt-deletion/cache")
     assert response.status_code == 409 and "GitHub" in response.json()["message"]
     page = client.get("/diff/cache").text
-    assert "Enforce (Spin Up)" in page and "Adopt Deletion" in page
-    assert "Enforce Kill" not in page and "Field by field" not in page
+    assert "[ Enforce ]" in page and "[ Adopt ]" in page
+    assert "Spin Up" not in page and "Field by field" not in page
     assert "Live Observed State" not in page
     rogue = client.get("/diff/rogue-db").text
-    assert "Enforce Kill" in rogue and "Live Observed State" in rogue
+    assert "[ Enforce ]" in rogue and "Live Observed State" in rogue
+    assert "Enforce Kill" not in rogue
     assert 'id="modal-root"' in rogue and "window.confirm" not in rogue
 
 
@@ -229,4 +231,6 @@ def test_batch_missing_scope_and_consolidated_adopt_refused_without_github(
     assert body["pr_url"] is None
     page = client.get("/").text
     assert "🔄 Refresh" in page and "event-toasts" not in page
+    assert "Spin up" not in page and ">Kill<" not in page and ">Revert<" not in page
+    assert 'src="/static/img/logo.png"' in page and "Awaiting restart" in page
     assert "🔄 Refresh" in client.get("/events").text

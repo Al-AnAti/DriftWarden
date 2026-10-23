@@ -236,6 +236,8 @@
         let mutation;
         if (action === "kill") {
             mutation = "Stop &amp; remove <code>" + esc(name) + "</code> (" + esc(record.image || "unknown image") + ")" + livePorts + ". Nothing is recreated.";
+        } else if (record.drift_status === "awaiting_restart") {
+            mutation = "Stop &amp; remove the unlabelled <code>" + esc(name) + "</code>" + livePorts + ", then recreate it with its Compose labels from Git <code>" + esc(shortSha()) + "</code>" + gitImage + gitPorts + ".";
         } else if (record.drift_status === "missing" && !record.container_id) {
             mutation = "Create and start <code>" + esc(record.display_name || record.ref) + "</code> from Git <code>" + esc(shortSha()) + "</code>" + gitImage + gitPorts + ".";
         } else {
@@ -275,10 +277,11 @@
         const changed = r.diffs.filter((d) => d.changed && d.field !== "state").map((d) => d.field);
         const service = r.service_name || (r.project ? "project: " + r.project : "—");
         let actions = '<a href="/diff/' + encodeURIComponent(r.ref) + '" class="btn btn-ghost">Diff</a>';
-        if (r.actions.includes("revert")) actions += actionButton("revert", r.ref, r.drift_status === "missing" ? "Spin up" : "Revert", "btn-rose");
-        if (r.actions.includes("kill")) actions += actionButton("kill", r.ref, "Kill", "btn-rose");
+        /* Every action is either Enforce (make the host match Git) or Adopt (make Git match the host). */
+        if (r.actions.includes("revert")) actions += actionButton("revert", r.ref, "Enforce", "btn-rose");
+        if (r.actions.includes("kill")) actions += actionButton("kill", r.ref, "Enforce", "btn-rose");
         if (r.actions.includes("adopt")) actions += actionButton("adopt", r.ref, "Adopt", "btn-emerald");
-        if (r.actions.includes("adopt_deletion")) actions += actionButton("adopt_deletion", r.ref, "Adopt deletion", "btn-emerald");
+        if (r.actions.includes("adopt_deletion")) actions += actionButton("adopt_deletion", r.ref, "Adopt", "btn-emerald");
         if (r.actions.includes("whitelist")) actions += ' <button onclick="wardenWhitelist(\'CONTAINER\', \'' + esc(r.container_name) + '\')" class="btn btn-ghost">Whitelist</button>';
         if (r.pending_adoption && r.pending_adoption.pr_url) actions += ' <a href="' + esc(r.pending_adoption.pr_url) + '" target="_blank" class="btn btn-violet">PR #' + esc(r.pending_adoption.pr_number) + "</a>";
         const finding = changed.length
@@ -298,7 +301,7 @@
         );
     }
 
-    const ORDER = ["rogue", "drifted", "missing", "pending_adoption", "matched"];
+    const ORDER = ["rogue", "drifted", "missing", "awaiting_restart", "pending_adoption", "matched"];
 
     function renderDashboard(snapshot) {
         const tbody = document.getElementById("state-rows");
@@ -420,38 +423,38 @@
 
     const ACTIONS = {
         revert: {
-            title: "Enforce baseline",
-            message: (ref) => "Recreate '" + ref + "' exactly as declared in Git?",
-            confirmText: "Enforce baseline",
+            title: "Enforce",
+            message: (ref) => "Make the host match Git: recreate '" + ref + "' exactly as declared in the baseline?",
+            confirmText: "Enforce",
             danger: true,
-            progress: (ref) => "Reverting " + ref + "…",
+            progress: (ref) => "Enforcing " + ref + "…",
             destructive: true,
             impact: true,
         },
         kill: {
-            title: "Enforce kill",
-            message: (ref) => "Stop and remove rogue container '" + ref + "'? This cannot be undone from DriftWarden.",
-            confirmText: "Kill container",
+            title: "Enforce",
+            message: (ref) => "Make the host match Git: '" + ref + "' is not declared, so it will be stopped and removed. This cannot be undone from DriftWarden.",
+            confirmText: "Enforce",
             danger: true,
-            progress: (ref) => "Removing " + ref + "…",
+            progress: (ref) => "Enforcing " + ref + "…",
             destructive: true,
             impact: true,
         },
         adopt: {
-            title: "Adopt into Git",
-            message: (ref) => "Synthesize YAML for '" + ref + "', cut a branch and open a pull request on the baseline repository. Environment values are written as ${KEY} placeholders.",
+            title: "Adopt",
+            message: (ref) => "Make Git match the host: synthesize YAML for '" + ref + "', cut a branch and open a pull request on the baseline repository. Environment values are written as ${KEY} placeholders.",
             inputs: [{ name: "note", label: "Note for the pull request (optional)", placeholder: "why this workload exists" }],
-            confirmText: "Open pull request",
-            progress: (ref) => "Opening pull request for " + ref + "…",
+            confirmText: "Adopt",
+            progress: (ref) => "Adopting " + ref + "…",
             destructive: false,
             endpoint: "adopt",
         },
         adopt_deletion: {
-            title: "Adopt deletion",
-            message: (ref) => "Open a pull request that removes service '" + ref + "' from the baseline, so Git matches the host where it is no longer running.",
+            title: "Adopt",
+            message: (ref) => "Make Git match the host: open a pull request that removes service '" + ref + "' from the baseline, since it is no longer running here.",
             inputs: [{ name: "note", label: "Note for the pull request (optional)", placeholder: "why the service was retired" }],
-            confirmText: "Open deletion PR",
-            progress: (ref) => "Opening deletion pull request for " + ref + "…",
+            confirmText: "Adopt",
+            progress: (ref) => "Adopting " + ref + "…",
             destructive: false,
             endpoint: "adopt-deletion",
         },
@@ -489,7 +492,7 @@
     /* ------------------------------------------------------ batch actions */
 
     const SCOPES = [
-        { value: "all", label: "All workloads", statuses: ["rogue", "drifted", "missing"], always: true },
+        { value: "all", label: "All workloads", statuses: ["rogue", "drifted", "missing", "awaiting_restart"], always: true },
         { value: "rogue", label: "Only rogue containers", statuses: ["rogue"] },
         { value: "drifted", label: "Only drifted containers", statuses: ["drifted"] },
         { value: "missing", label: "Only missing containers", statuses: ["missing"] },
@@ -525,8 +528,8 @@
         } else {
             list.innerHTML = affected.map((r) => {
                 const verb = operation === "enforce"
-                    ? (r.drift_status === "rogue" ? "kill" : "recreate")
-                    : (r.drift_status === "missing" ? "deletion PR" : "adopt PR");
+                    ? (r.drift_status === "rogue" ? "enforce: remove" : "enforce: recreate from Git")
+                    : (r.drift_status === "missing" ? "adopt: remove from Git" : "adopt: write to Git");
                 return "<div>" + badge(r.drift_status) + ' <span class="ml-2">' + esc(r.display_name || r.ref) + '</span> <span class="text-slate-500">→ ' + verb + "</span></div>";
             }).join("");
         }

@@ -313,6 +313,8 @@ class HostSnapshot(BaseModel):
             return "drift_detected"
         if counts[DriftStatus.MISSING.value]:
             return "missing"
+        if counts[DriftStatus.AWAITING_RESTART.value]:
+            return "awaiting_restart"
         return "in_sync"
 
     def find(self, ref: str) -> DriftRecord | None:

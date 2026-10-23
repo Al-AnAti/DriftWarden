@@ -438,6 +438,8 @@ def _managed_record(
     container: LiveContainer | None,
     context: EvaluationContext,
     now: datetime,
+    *,
+    awaiting_restart: bool = False,
 ) -> DriftRecord:
     assert context.baseline is not None
     project = context.baseline.project_name
@@ -492,6 +494,14 @@ def _managed_record(
         status = DriftStatus.PENDING_ADOPTION
         message = f"'{container.name}' is buffered while adoption PR #{pending.pr_number} deploys."
         actions = []
+    elif awaiting_restart:
+        status = DriftStatus.AWAITING_RESTART
+        message = (
+            f"'{container.name}' is now declared in Git as service '{service.service_name}' "
+            "but still runs without Compose labels; restart it through Compose or press "
+            "Enforce to recreate it from the baseline."
+        )
+        actions = ["revert"]
     elif changed:
         status = DriftStatus.DRIFTED
         message = (
@@ -554,6 +564,7 @@ def evaluate(containers: list[LiveContainer], context: EvaluationContext) -> Eva
 
     by_service: dict[str, list[LiveContainer]] = {name: [] for name in baseline.services}
     rogues: list[tuple[LiveContainer, str]] = []
+    unlabelled: list[LiveContainer] = []
     for container in candidates:
         project = container.compose_project
         if project == baseline.project_name:
@@ -565,13 +576,32 @@ def evaluate(containers: list[LiveContainer], context: EvaluationContext) -> Eva
         elif project:
             rogues.append((container, f"belongs to untracked Compose project '{project}'"))
         else:
+            unlabelled.append(container)
+
+    # An adopted rogue container whose pull request has merged: Git now declares a
+    # service named after it, but nothing with Compose labels runs yet. Until Compose
+    # (or Enforce) recreates it, it is AWAITING_RESTART rather than rogue + missing.
+    awaiting: dict[str, LiveContainer] = {}
+    for container in unlabelled:
+        guess = sanitise_service_name(container.name, baseline.project_name)
+        if guess in baseline.services and not by_service[guess] and guess not in awaiting:
+            awaiting[guess] = container
+        else:
             rogues.append((container, "no Compose project labels"))
 
     records: list[DriftRecord] = []
     for service_name, service in baseline.services.items():
         instances = by_service[service_name]
         if not instances:
-            records.append(_managed_record(service, None, context, now))
+            waiting = awaiting.get(service_name)
+            if waiting is not None and waiting.state == "running":
+                records.append(
+                    _managed_record(service, waiting, context, now, awaiting_restart=True)
+                )
+            else:
+                if waiting is not None:
+                    rogues.append((waiting, "no Compose project labels"))
+                records.append(_managed_record(service, None, context, now))
             continue
         primary, extras = _pick_primary(instances)
         records.append(_managed_record(service, primary, context, now))

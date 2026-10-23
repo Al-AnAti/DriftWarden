@@ -62,6 +62,11 @@ class DriftStatus(str, Enum):
     PENDING_ADOPTION = "pending_adoption"
     """The container is buffered while an adoption change is being deployed."""
 
+    AWAITING_RESTART = "awaiting_restart"
+    """An adopted rogue container is now declared in Git but still runs without the
+    Compose labels Git would give it; it becomes MATCHED once Compose (or Enforce)
+    recreates it."""
+
 
 class AuditAction(str, Enum):
     """Identifies an auditable action performed by the control plane or engine."""

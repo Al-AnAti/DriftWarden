@@ -328,3 +328,42 @@ def test_display_name_falls_back_to_baseline_identity(baseline: Baseline) -> Non
     assert by_ref["web"].display_name == "web"
     assert by_ref["cache"].display_name == "pinned-cache"
     assert by_ref["web"].container_name is None
+
+
+def test_adopted_rogue_becomes_awaiting_restart_after_merge(
+    baseline: Baseline, rogue_container: LiveContainer
+) -> None:
+    from shared.models import ParsedService
+
+    # The merged baseline now declares a service named after the rogue container.
+    baseline.services["rogue-db"] = ParsedService(
+        service_name="rogue-db", image="mariadb:latest", ports=["3306:3306/tcp"]
+    )
+    result = evaluate([rogue_container], context(baseline))
+    by_ref = {r.ref: r for r in result.records}
+    assert "rogue-db" in by_ref and by_ref["rogue-db"].drift_status is DriftStatus.AWAITING_RESTART
+    record = by_ref["rogue-db"]
+    assert record.service_name == "rogue-db" and record.container_id == rogue_container.id
+    assert record.actions == ["revert"]
+    assert "Compose labels" in record.message
+    assert statuses(result.records).get("rogue-db") == "awaiting_restart"
+    assert "missing" not in statuses(result.records).values() or statuses(result.records)["web"]
+
+    # Once Compose recreated it with labels, the unlabelled leftover is plain rogue again.
+    labelled = make_container(
+        id="7" * 64,
+        name=f"{PROJECT}-rogue-db-1",
+        image="mariadb:latest",
+        labels=compose_labels("rogue-db"),
+        ports=["3306:3306/tcp"],
+    )
+    result = evaluate([rogue_container, labelled], context(baseline))
+    by_ref = {r.ref: r for r in result.records}
+    assert by_ref[f"{PROJECT}-rogue-db-1"].drift_status is DriftStatus.MATCHED
+    assert by_ref["rogue-db"].drift_status is DriftStatus.ROGUE
+
+    # A stopped unlabelled container does not count as awaiting restart.
+    rogue_container.state = "exited"
+    result = evaluate([rogue_container], context(baseline))
+    by_ref = {r.ref: r for r in result.records}
+    assert by_ref["rogue-db"].drift_status is DriftStatus.ROGUE

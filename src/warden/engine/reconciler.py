@@ -682,7 +682,13 @@ class Reconciler:
         targets = [
             r
             for r in snapshot.records
-            if r.drift_status in (DriftStatus.ROGUE, DriftStatus.DRIFTED, DriftStatus.MISSING)
+            if r.drift_status
+            in (
+                DriftStatus.ROGUE,
+                DriftStatus.DRIFTED,
+                DriftStatus.MISSING,
+                DriftStatus.AWAITING_RESTART,
+            )
         ]
         if not targets:
             return False
@@ -1215,7 +1221,12 @@ class Reconciler:
     async def batch(self, request: BatchRequest) -> BatchResult:
         """Run Enforce All or Adopt All over a scope of the current snapshot."""
         wanted: set[DriftStatus] = {
-            "all": {DriftStatus.ROGUE, DriftStatus.DRIFTED, DriftStatus.MISSING},
+            "all": {
+                DriftStatus.ROGUE,
+                DriftStatus.DRIFTED,
+                DriftStatus.MISSING,
+                DriftStatus.AWAITING_RESTART,
+            },
             "rogue": {DriftStatus.ROGUE},
             "drifted": {DriftStatus.DRIFTED},
             "missing": {DriftStatus.MISSING},

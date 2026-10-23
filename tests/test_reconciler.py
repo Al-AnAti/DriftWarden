@@ -699,3 +699,37 @@ async def test_revoke_cascades_to_every_entry_sharing_the_pull_request(
         assert calls["n"] == 1 and len(reconciler.pending) == 3
     finally:
         await reconciler.stop()
+
+
+async def test_enforce_mode_recreates_awaiting_restart_containers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fixture_yaml: str,
+    rogue_container: LiveContainer,
+) -> None:
+    merged = (
+        fixture_yaml.rstrip()
+        + '\n  rogue-db:\n    image: mariadb:latest\n    ports:\n      - "3306:3306"\n'
+    )
+    path = tmp_path / "merged.yaml"
+    path.write_text(merged, encoding="utf-8")
+    monkeypatch.setenv("MOCK_BASELINE_PATH", str(path))
+    monkeypatch.setenv("WARDEN_MODE", "enforce")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container]
+    watcher.on_recreate = container_from_service
+    reconciler, _ = build(settings, watcher)
+    await reconciler.start()
+    try:
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is DriftStatus.AWAITING_RESTART
+        assert reconciler.projector.snapshot.counts()["awaiting_restart"] == 1
+        await reconciler.reconcile("sweep")
+        await asyncio.sleep(0.1)
+        assert rogue_container.id in watcher.removed
+        assert [r[0] for r in watcher.recreated if r[0] == "rogue-db"] == ["rogue-db"]
+        after = reconciler.projector.snapshot.find("infrastructure-test-rogue-db-1")
+        assert after is not None and after.drift_status is DriftStatus.MATCHED
+    finally:
+        await reconciler.stop()

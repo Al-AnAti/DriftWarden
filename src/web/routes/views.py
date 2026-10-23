@@ -25,12 +25,14 @@ STATUS_META: dict[str, dict[str, str]] = {
     DriftStatus.MISSING.value: {"label": "Missing", "tone": "sky"},
     DriftStatus.ROGUE.value: {"label": "Rogue", "tone": "rose"},
     DriftStatus.PENDING_ADOPTION.value: {"label": "Pending adoption", "tone": "violet"},
+    DriftStatus.AWAITING_RESTART.value: {"label": "Awaiting restart", "tone": "orange"},
 }
 """Display label and Tailwind colour family per status."""
 
 OVERALL_META: dict[str, dict[str, str]] = {
     "in_sync": {"label": "IN SYNC", "tone": "emerald"},
     "missing": {"label": "SERVICE MISSING", "tone": "sky"},
+    "awaiting_restart": {"label": "AWAITING RESTART", "tone": "orange"},
     "drift_detected": {"label": "DRIFT DETECTED", "tone": "amber"},
     "docker_unavailable": {"label": "DOCKER UNAVAILABLE", "tone": "rose"},
     "baseline_unavailable": {"label": "BASELINE_UNAVAILABLE", "tone": "rose"},
@@ -84,6 +86,7 @@ STATUS_ORDER = [
     DriftStatus.ROGUE,
     DriftStatus.DRIFTED,
     DriftStatus.MISSING,
+    DriftStatus.AWAITING_RESTART,
     DriftStatus.PENDING_ADOPTION,
     DriftStatus.MATCHED,
 ]

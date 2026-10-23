@@ -11,8 +11,8 @@ case "$COMMAND" in
     
   drift)
     echo "🚨 Injecting chaos into the host environment..."
-    echo "1. Spawning a ROGUE container (unauthorized database, no compose labels)..."
-    docker run -d --name rogue-db -p 3306:3306 -e MARIADB_ROOT_PASSWORD=rogue mariadb:latest
+    echo "1. Spawning a ROGUE container (unauthorized memcached, no compose labels, no env needed)..."
+    docker run -d --name rogue-memcached -p 11211:11211 memcached:alpine
     
     echo "2. Deleting a required container to trigger MISSING state (web)..."
     docker rm -f infrastructure-test-web-1 || true
@@ -32,13 +32,13 @@ case "$COMMAND" in
   clean)
     echo "🧹 Wiping demo containers and resetting host..."
     docker compose -f tests/fixtures/docker-compose.test.yaml down
-    docker rm -f rogue-db infrastructure-test-cache-1 infrastructure-test-web-1 2>/dev/null || true
+    docker rm -f rogue-memcached rogue-db infrastructure-test-cache-1 infrastructure-test-web-1 2>/dev/null || true
     docker network rm infrastructure-test_default 2>/dev/null || true
     echo "✅ Environment completely reset."
     ;;
     
   *)
-    echo "Usage: bash scripts/demo.sh {infra-up|drift|clean}"
+    echo "Usage: bash scripts/demo.sh {up|drift|clean}"
     exit 1
     ;;
 esac

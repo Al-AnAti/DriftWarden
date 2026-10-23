@@ -15,7 +15,11 @@ endif
 
 export PYTHONPATH = src
 
-.PHONY: install install-dev format lint typecheck test coverage start check clean reset-logs demo-up demo-drift demo-down
+.PHONY: install install-dev format lint typecheck test coverage start dev stop check clean reset-logs demo-up demo-drift demo-down
+
+IMAGE ?= driftwarden:latest
+CONTAINER ?= driftwarden
+PORT ?= 8000
 
 # ------------------------------------------
 # Setup & Dependency Management
@@ -65,9 +69,32 @@ check:
 # Execution & Cleanup
 # ------------------------------------------
 
+# Containerised run: builds the image, mounts the Docker socket and keeps the
+# SQLite database in ./data so it survives container recreation.
 start:
-	@echo "🚀 Starting DriftWarden Control Plane & Engine Loop..."
-	uvicorn web.app:app --app-dir src --reload --port 8000
+	@echo "🐳 Building and starting the DriftWarden container on http://localhost:$(PORT) ..."
+	docker build -t $(IMAGE) .
+	-docker rm -f $(CONTAINER) >/dev/null 2>&1
+	mkdir -p data
+	docker run -d --name $(CONTAINER) \
+		-p $(PORT):8000 \
+		--env-file .env \
+		-e API_HOST=0.0.0.0 \
+		-e API_PORT=8000 \
+		-e DATABASE_URL=sqlite:////data/warden.db \
+		-e DOCKER_SOCKET_PATH=/var/run/docker.sock \
+		-v //var/run/docker.sock:/var/run/docker.sock \
+		-v "$(CURDIR)/data:/data" \
+		$(IMAGE)
+	@echo "✅ Container $(CONTAINER) is up; database in ./data/warden.db. Stop with: make stop"
+
+# Host-based run with hot reload for development.
+dev:
+	@echo "🚀 Starting DriftWarden on the host with live reload..."
+	uvicorn web.app:app --app-dir src --reload --port $(PORT)
+
+stop:
+	-docker rm -f $(CONTAINER)
 
 clean:
 	$(BASH_CMD) scripts/clean.sh

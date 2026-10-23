@@ -1,9 +1,10 @@
 # DriftWarden: GitOps drift guardrail for standalone Docker hosts.
 #
-# Run with the host Docker socket mounted:
+# Run with the host Docker socket mounted (or simply `make start`):
 #   docker run -d --name driftwarden \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
-#     --env-file .env -p 8000:8000 driftwarden:latest
+#     -v "$PWD/data:/data" -e DATABASE_URL=sqlite:////data/warden.db \
+#     --env-file .env -e API_HOST=0.0.0.0 -p 8000:8000 driftwarden:latest
 #
 # The container name prefix "driftwarden" and its own container id are
 # automatically excluded from drift evaluation.
@@ -17,6 +18,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     API_PORT=8000
 
 WORKDIR /app
+
+# `make start` mounts ./data here and points DATABASE_URL at /data/warden.db.
+RUN mkdir -p /data
+VOLUME ["/data"]
 
 COPY pyproject.toml README.md ./
 COPY src ./src

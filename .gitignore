@@ -4,6 +4,8 @@
 !.env.example
 
 # 2. Local State Buffer & Databases
+# SQLite data directory mounted into the DriftWarden container by `make start`
+data/
 # Prevents committing the live SQLite database used for pending_adoptions
 *.db
 *.db-*

@@ -68,6 +68,7 @@ All four enums subclass `str`, so their values serialise to plain strings in JSO
 | `ROGUE` | `rogue` | Container exists on the host but is not declared in Git (no labels, foreign project, spoofed labels, or a duplicate replica). |
 | `MISSING` | `missing` | Service is declared in Git but has no running container (none at all, or only an exited / created one). |
 | `DRIFTED` | `drifted` | Service exists in Git but a compared field differs, or the container is paused / restarting / dead. |
+| `AWAITING_RESTART` | An adopted rogue container whose PR merged: declared in Git, still running without Compose labels; `revert` (Enforce) or `docker compose up` turns it into `MATCHED`. |
 | `PENDING_ADOPTION` | `pending_adoption` | Buffered while an adoption pull request is open; exempt from enforcement. |
 
 **`AuditAction`** — every row in the `audit_log` table has one of these. Grouped by who writes them:

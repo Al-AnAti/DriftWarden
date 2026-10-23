@@ -18,19 +18,21 @@ security warning, endpoint list.
 
 A standalone Docker host (no Kubernetes, no Swarm) drifts. Someone runs `docker run` to test
 something and forgets it. Someone hot-patches a container with a different image or port.
-Someone deletes a service that CI will never notice is gone. The `docker-compose.yml` in Git
+Someone deletes a service that CI will never notice is gone. The `docker-compose.yaml` in Git
 says one thing; the host does another; nobody is told.
 
 DriftWarden treats the Compose file on GitHub as the **single source of truth** and runs on the
 host, connected to the Docker socket, to make sure the live containers never diverge from it
 silently. Two directions are covered:
 
-* **Git → host (enforcement).** A container that is not declared is *rogue* and can be killed;
-  a declared service that is wrong is *drifted* and can be recreated exactly as declared; a
-  declared service that is not running is *missing* and can be spun up.
-* **Host → Git (adoption, "Reverse-GitOps").** When the live state is actually the desired
-  one, DriftWarden reverse-engineers the container into YAML, edits the Compose file without
-  destroying comments, and opens a pull request so the baseline catches up through review.
+* **Git → host: Enforce.** One button. A container that is not declared is *rogue* and is
+  removed; a declared service that is wrong is *drifted* and is recreated exactly as declared;
+  a declared service that is not running is *missing* and is created; an adopted container
+  that is *awaiting restart* is recreated with its Compose labels.
+* **Host → Git: Adopt ("Reverse-GitOps").** One button. When the live state is actually the
+  desired one, DriftWarden reverse-engineers the container into YAML, edits the Compose file
+  without destroying comments, and opens a pull request so the baseline catches up through
+  review; for a missing service the pull request removes it from the baseline instead.
 
 Everything is visible on a dashboard that updates live, every action is audited, and nothing
 destructive happens on its own unless the operator deliberately switches the mode to
@@ -42,7 +44,7 @@ destructive happens on its own unless the operator deliberately switches the mod
 | --- | --- |
 | **Baseline** | The parsed Compose file from `TARGET_REPO` / `TARGET_BRANCH` / `BASELINE_FILE_PATH`. Cached in memory, re-polled on an interval. |
 | **Managed namespace** | The Compose project name: the baseline's top-level `name:`, else `COMPOSE_NAMESPACE`. Containers labelled `com.docker.compose.project=<that name>` are evaluated as managed services; everything else is rogue. |
-| **Drift state** | `MATCHED`, `DRIFTED`, `MISSING`, `ROGUE`, `PENDING_ADOPTION` (details in `shared.md`). |
+| **Drift state** | `MATCHED`, `DRIFTED`, `MISSING`, `ROGUE`, `PENDING_ADOPTION`, `AWAITING_RESTART` (details in `shared.md`). |
 | **Snapshot** | The full result of one reconcile cycle, held in memory and pushed to browsers. |
 | **Mode** | `observe` (detect, show, wait for a click) or `enforce` (fix autonomously after a grace window). |
 | **Buffer** | Entries that are `PENDING_ADOPTION`: exempt from enforcement while their pull request is open. |
@@ -65,28 +67,12 @@ For every container on the host, in this order:
 
 ## 2. The workflow, end to end
 
-```
-   GitHub (TARGET_REPO)                             Docker socket
-   docker-compose.yml  ──PyGithub, ETag ──┐    ┌── events (thread) ── asyncio.Queue
-                                          ▼    ▼                          │ debounce
-                                   baseline_parser              ┌─────────┘
-                                          │                     ▼
-                                     Baseline ───────────▶ reconciler.reconcile()
-                                                                │
-                                                 list_containers + evaluate (diff_engine)
-                                                                │
-                                                           HostSnapshot
-                                            ┌───────────────────┼──────────────────┐
-                                            ▼                   ▼                  ▼
-                                   state_projector         drift_events        enforce? (enforce mode,
-                                   ── SSE ──▶ browser      audit_log (SQLite)  after grace window)
-                                            │
-                     operator clicks: Revert / Spin up / Kill / Adopt / Adopt deletion /
-                     Enforce All / Adopt All / Whitelist / Revoke Buffer / settings
-                                            │
-                     Adopt ──▶ yaml_mutator ──▶ github_client: branch + commit + PR
-                                            ──▶ pending_adoptions (buffer) until merged/closed
-```
+![DriftWarden end-to-end architecture workflow](../images/workflow.jpg)
+
+*Inputs (GitHub baseline, Docker socket) feed the reconciler; the diff engine compares the host
+snapshot with the declared configuration; state and logs go to the browser over SSE and to
+SQLite; the operator decides with **Enforce** (make the host match Git) or **Adopt** (make Git
+match the host, through a pull request and the state buffer).*
 
 Step by step:
 
@@ -113,31 +99,42 @@ Step by step:
 5. **A change on GitHub.** The poller sees a new blob SHA, parses the new baseline, clears any
    buffer entries the new file satisfies, starts the enforcement grace window, and reconciles.
 6. **Operator actions** (observe mode, from the dashboard or the diff page, each behind a
-   dark confirmation modal that previews the exact Docker operations):
+   dark confirmation modal that previews the exact Docker operations). There are exactly two
+   verbs; what each one does depends only on the entry's state:
 
-   | Action | On | Effect |
+   | Button | On | Effect |
    | --- | --- | --- |
-   | **Revert / Enforce Baseline (Rollback)** | DRIFTED | Removes the live container and recreates it from the baseline service through the Docker SDK (`containers.create` + `start`, never `docker compose`). |
-   | **Spin up / Enforce (Spin Up)** | MISSING | Same recreate path for a service with no container. |
-   | **Kill / Enforce Kill** | ROGUE | Graceful stop, then forced remove. |
-   | **Adopt into Git (Auto-PR)** | ROGUE or DRIFTED | Synthesises the service block (new service, or only the changed fields of an existing one), cuts a `warden/adopt-<name>-<timestamp>` branch, commits with a comment-preserving edit, opens a PR. Environment **values are never committed**; keys become `${KEY}` placeholders. An open PR for the same container is reused. |
-   | **Adopt Deletion (Auto-PR)** | MISSING | Opens a PR that removes the service block so Git matches the host. |
-   | **Enforce All / Adopt All** | a scope: all, rogue, drifted, missing | Enforce runs kill/revert per entry and reports succeeded/failed counts. Adopt All puts every add / sync / remove into **one** PR on a `warden/batch-adopt-*` branch with a checklist body. |
+   | **Enforce** | DRIFTED | Removes the live container and recreates it from the baseline service through the Docker SDK (`containers.create` + `start`, never `docker compose`). API: `revert`. |
+   | **Enforce** | MISSING | Same recreate path for a service with no container. API: `revert`. |
+   | **Enforce** | AWAITING_RESTART | Removes the unlabelled container and recreates it from the now-merged baseline with its Compose labels; it becomes MATCHED. API: `revert`. |
+   | **Enforce** | ROGUE | Git declares nothing, so: graceful stop, then forced remove. API: `kill`. |
+   | **Adopt** | ROGUE or DRIFTED | Synthesises the service block (new service, or only the changed fields of an existing one), cuts a `warden/adopt-<name>-<timestamp>` branch, commits with a comment-preserving edit, opens a PR. Environment **values are never committed**; keys become `${KEY}` placeholders; no `container_name` is written. An open PR for the same container is reused. API: `adopt`. |
+   | **Adopt** | MISSING | Opens a PR that removes the service block so Git matches the host. API: `adopt-deletion`. |
+   | **Enforce All / Adopt All** | a scope: all, rogue, drifted, missing | Enforce All applies Enforce to every entry in scope and reports succeeded/failed counts. Adopt All puts every add / sync / remove into **one** PR on a `warden/batch-adopt-*` branch with a checklist body. |
    | **Whitelist** | ROGUE | Exempts the container (or its whole Compose project) from evaluation; stored in SQLite, revocable on Cluster Config. |
    | **Revoke Buffer** | a buffered entry | Comments on and closes the PR and evicts every entry that shares it; the workloads return to their real state next cycle. |
 
 7. **The buffer.** After Adopt, the entry becomes `PENDING_ADOPTION`: still visible, exempt
    from enforcement, linked to its PR. The PR poller follows it: **merged** → the baseline is
-   re-fetched and the entry clears (the workload is now `MATCHED`); **closed unmerged** → the
-   entry clears and the workload goes back to `ROGUE` / `DRIFTED` / `MISSING`. The
-   `ADOPTION_BUFFER_TTL_SECONDS` safety timer only applies to entries whose PR state cannot be
-   determined (no PR, or GitHub unreachable for that long).
-8. **Enforce mode.** Switching the mode on Cluster Config requires typing `ENABLE AUTONOMOUS`.
+   re-fetched and the entry clears; **closed unmerged** → the entry clears and the workload
+   goes back to `ROGUE` / `DRIFTED` / `MISSING`. The `ADOPTION_BUFFER_TTL_SECONDS` safety
+   timer only applies to entries whose PR state cannot be determined (no PR, or GitHub
+   unreachable for that long).
+8. **After the merge: `AWAITING_RESTART`.** A drifted service is `MATCHED` as soon as the
+   merged baseline agrees with it. An adopted *rogue* container is different: Git now declares
+   a service named after it, but the container itself still runs without Compose labels, and
+   the generated YAML deliberately carries no `container_name` so Compose keeps control of
+   naming and `--scale`. The diff engine recognises a running unlabelled container whose
+   sanitised name is a declared service with no labelled instance and shows it as
+   `AWAITING_RESTART` instead of rogue-plus-missing. `docker compose up` on the host, or
+   **Enforce**, recreates it with its labels and it becomes `MATCHED`. In enforce mode the
+   engine does that itself after the grace window.
+9. **Enforce mode.** Switching the mode on Cluster Config requires typing `ENABLE AUTONOMOUS`.
    After the grace window (`ENFORCEMENT_GRACE_SECONDS`, re-armed on every baseline change and
-   on the switch itself), every cycle that finds ROGUE / DRIFTED / MISSING entries re-fetches
-   the baseline, abandons the pass if it changed, and otherwise kills and recreates
-   autonomously, with a 60-second per-entry cooldown so an unfixable service cannot cause a
-   loop. `PENDING_ADOPTION` and whitelisted entries are never touched.
+   on the switch itself), every cycle that finds ROGUE / DRIFTED / MISSING / AWAITING_RESTART
+   entries re-fetches the baseline, abandons the pass if it changed, and otherwise applies
+   Enforce autonomously, with a 60-second per-entry cooldown so an unfixable service cannot
+   cause a loop. `PENDING_ADOPTION` and whitelisted entries are never touched.
 
 ---
 
@@ -162,13 +159,6 @@ and mypy, and the Dockerfile), so modules are `shared.models`, `warden.engine.re
 | the own-action cache, enforcement cooldowns, image-default caches | `pending_adoptions` — the buffer and its history |
 | the whitelist index and buffer dict (copies of the tables) | `whitelisted_entities` — exemptions |
 | | `setting_overrides` — settings changed from the UI; win over `.env`, which is never written |
-
-**Design rules** (from `.github/copilot-instructions.md`, enforced by review and by the type
-checker): Python 3.10 syntax floor with `X | None` unions; Pydantic at every boundary and
-dataclasses inside the engine; Loguru only; `ruamel.yaml` round-trip only; PyGithub only (no
-subprocess `git`, no clone); the Docker SDK only (never `docker compose`); no SPA framework;
-Google-style docstrings; every expected error inherits `DriftWardenError`; Conventional
-Commits on local `main`.
 
 ---
 
@@ -234,7 +224,9 @@ instead of WSL.
 | --- | --- | --- |
 | `make install` | `pip install -e .` | Runtime dependencies only. |
 | `make install-dev` | `pip install -e ".[dev]"` | Everything, including ruff, mypy, pytest. |
-| `make start` | `uvicorn web.app:app --app-dir src --reload --port 8000` | Run the control plane and engine with live reload at http://localhost:8000. |
+| `make dev` | `uvicorn web.app:app --app-dir src --reload --port 8000` | Run the control plane and engine on the host with live reload at http://localhost:8000. |
+| `make start` | `docker build -t driftwarden:latest .` then `docker run -d --name driftwarden -p 8000:8000 --env-file .env -e API_HOST=0.0.0.0 -e DATABASE_URL=sqlite:////data/warden.db -v //var/run/docker.sock:/var/run/docker.sock -v ./data:/data driftwarden:latest` | Run DriftWarden as a container: the socket is mounted, the SQLite database lives in `./data` so it survives recreation, and the API listens on all interfaces inside the container. `IMAGE`, `CONTAINER` and `PORT` can be overridden. |
+| `make stop` | `docker rm -f driftwarden` | Remove the container started by `make start`. |
 | `make format` | `ruff format .` then `ruff check --fix .` | Fix formatting and auto-fixable lint. |
 | `make lint` | `ruff check .` | Lint only. |
 | `make typecheck` | `mypy src/` | Strict typing. |
@@ -258,7 +250,7 @@ and `cache` (`redis:alpine`, 6379→6379), both labelled `warden.managed=true` a
 | Command | What happens on the host | What the dashboard shows |
 | --- | --- | --- |
 | `up` | `docker compose -f tests/fixtures/docker-compose.test.yaml up -d` | two `Matched` rows, `IN SYNC` |
-| `drift` | 1. `docker run -d --name rogue-db -p 3306:3306 mariadb:latest` with no labels. 2. `docker rm -f infrastructure-test-web-1`. 3. Recreates `infrastructure-test-cache-1` with the right Compose labels but `redis:alpine` on port `6378:6378`, `warden.managed=false`, `warden.repo=not-my-cs-project` and the default bridge network. | `rogue-db` **Rogue**, `web` **Missing** (*declared in Git, not running*), `infrastructure-test-cache-1` **Drifted** on `ports`, `labels`, `networks`; the status pill goes `DRIFT DETECTED` and the warning chime plays. From here: Revert the cache, Spin up web, Kill or Adopt the database. |
+| `drift` | 1. `docker run -d --name rogue-memcached -p 11211:11211 memcached:alpine` with no labels and no environment variables. 2. `docker rm -f infrastructure-test-web-1`. 3. Recreates `infrastructure-test-cache-1` with the right Compose labels but `redis:alpine` on port `6378:6378`, `warden.managed=false`, `warden.repo=not-my-cs-project` and the default bridge network. | `rogue-memcached` **Rogue**, `web` **Missing** (*declared in Git, not running*), `infrastructure-test-cache-1` **Drifted** on `ports`, `labels`, `networks`; the status pill goes `DRIFT DETECTED` and the warning chime plays. From here: **Enforce** the cache (recreate), **Enforce** web (create), **Enforce** (remove) or **Adopt** (pull request) the memcached. After that PR merges, the memcached shows **Awaiting restart** until `docker compose up` or Enforce recreates it with labels. |
 | `clean` | `docker compose down`, force-removes the three containers, removes the `infrastructure-test_default` network. | back to empty / missing until `up` again |
 
 ### `scripts/reset_logs.py`
@@ -321,17 +313,11 @@ mypy, tests) before a commit.
 
 `Dockerfile` builds a `python:3.12-slim` image with `PYTHONPATH=/app/src`, installs the
 project, copies `tests/fixtures` (so mock mode works inside the container), labels the image
-`warden.ignore=true` and starts uvicorn on `API_HOST:API_PORT`. Mount `/var/run/docker.sock`
-and pass `--env-file .env`. The container detects its own id and excludes itself from
-evaluation.
-
-### Git hygiene
-
-`.gitignore` excludes `.env` and every `.env.*` except `.env.example`, all SQLite files
-including the WAL and shared-memory side files (`*.db`, `*.db-*`), virtual environments,
-caches, build artefacts and IDE files. Commits follow Conventional Commits
-(`feat(engine): ...`, `fix(scripts): ...`, `chore(make): ...`, `test: ...`) directly on local
-`main`.
+`warden.ignore=true`, declares a `/data` volume for the database and starts uvicorn on
+`API_HOST:API_PORT`. `make start` does the whole thing: build, mount `/var/run/docker.sock`
+and `./data:/data`, pass `--env-file .env` plus `API_HOST=0.0.0.0` and
+`DATABASE_URL=sqlite:////data/warden.db`. The container detects its own id and excludes itself
+from evaluation. `make dev` stays host-based with hot reload.
 
 ---
 

@@ -225,8 +225,9 @@ instead of WSL.
 | `make install` | `pip install -e .` | Runtime dependencies only. |
 | `make install-dev` | `pip install -e ".[dev]"` | Everything, including ruff, mypy, pytest. |
 | `make dev` | `uvicorn web.app:app --app-dir src --reload --port 8000` | Run the control plane and engine on the host with live reload at http://localhost:8000. |
-| `make start` | `docker build -t driftwarden:latest .` then `docker run -d --name driftwarden -p 8000:8000 --env-file .env -e API_HOST=0.0.0.0 -e DATABASE_URL=sqlite:////data/warden.db -v //var/run/docker.sock:/var/run/docker.sock -v ./data:/data driftwarden:latest` | Run DriftWarden as a container: the socket is mounted, the SQLite database lives in `./data` so it survives recreation, and the API listens on all interfaces inside the container. `IMAGE`, `CONTAINER` and `PORT` can be overridden. |
-| `make stop` | `docker rm -f driftwarden` | Remove the container started by `make start`. |
+| `make start` | `scripts/container.sh start` (through Git Bash on Windows): `docker build -t driftwarden:latest .` then `docker run -d --name driftwarden -p 8000:8000 --env-file .env -e API_HOST=0.0.0.0 -e DATABASE_URL=sqlite:////data/warden.db -v //var/run/docker.sock:/var/run/docker.sock -v <project>/data:/data driftwarden:latest` | Run DriftWarden as a container: the socket is mounted, the SQLite database lives in `./data/warden.db` so it survives recreation, and the API listens on all interfaces inside the container. `IMAGE`, `CONTAINER` and `PORT` can be overridden. |
+| `make stop` | `scripts/container.sh stop` | Remove the container started by `make start`; `./data` is kept. |
+| `make logs` | `scripts/container.sh logs` | Follow the container's logs. |
 | `make format` | `ruff format .` then `ruff check --fix .` | Fix formatting and auto-fixable lint. |
 | `make lint` | `ruff check .` | Lint only. |
 | `make typecheck` | `mypy src/` | Strict typing. |

@@ -150,7 +150,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 ## 🛠️ Development workflow
 
 * `make dev` runs the control plane and engine on the host with live reload.
-* `make start` builds the image and runs DriftWarden as a container with `API_HOST=0.0.0.0`, the Docker socket mounted and the SQLite database kept in `./data`; `make stop` removes it.
+* `make start` builds the image and runs DriftWarden as a container with `API_HOST=0.0.0.0`, the Docker socket mounted and the SQLite database kept in `./data/warden.db` (separate from the `./warden.db` that `make dev` uses through `.env`; point `DATABASE_URL` at `sqlite:///./data/warden.db` in `.env` if you want both to share one file); `make stop` removes the container, `make logs` follows it. The recipes run through `scripts/container.sh` in Git Bash, so they work from cmd.exe and PowerShell too.
 * `make check` runs `ruff format --check`, `ruff check`, `mypy src/` (strict) and `pytest`. Run it before every commit.
 * `make format`, `make lint`, `make typecheck`, `make test` run the individual tools.
 * `make clean` wipes caches.

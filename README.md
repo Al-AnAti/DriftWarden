@@ -1,10 +1,12 @@
 <p align="center">
-  <img src="images/logo.png" alt="DriftWarden logo" width="160">
+  <img src="images/logo.svg" alt="DriftWarden logo" width="160">
 </p>
 
 # DriftWarden
 
 DriftWarden is a lightweight GitOps guardrail and drift-remediation daemon for standalone Docker hosts. It treats a `docker-compose.yml` hosted on GitHub as the single declarative source of truth and continuously watches the host's Docker socket so live workloads never diverge from it silently.
+
+![DriftWarden in four steps: a manual change on the host, the event captured, the operator decides, the host is back in sync](images/timeline.svg)
 
 ## 🎯 What it does
 
@@ -18,7 +20,11 @@ Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker ru
 * **State buffer.** Adopted containers stay `PENDING_ADOPTION`, exempt from enforcement, for as long as their pull request is open. A merge triggers a baseline re-fetch that clears the entry (the workload becomes `MATCHED`); closing the PR without merging returns it to `ROGUE` or `DRIFTED`.
 * **Whitelist.** Operators can exempt a container or an entire foreign Compose project from the dashboard; the exemption lives in SQLite.
 
+![Enforce makes the host match Git; Adopt makes Git match the host through a pull request](images/enforce-vs-adopt.svg)
+
 ### Drift states
+
+![Drift state machine: MATCHED, DRIFTED, MISSING, ROGUE, PENDING_ADOPTION and AWAITING_RESTART with the transitions between them](images/state-machine.svg)
 
 | State | Meaning |
 | --- | --- |
@@ -47,14 +53,7 @@ Longer, package-by-package guides live in [`docs/`](docs/):
 
 ## 🏗️ Architecture
 
-```
-GitHub (TARGET_REPO)  ──PyGithub, ETag cached──▶  baseline_parser  ──▶  Baseline (canonical services)
-                                                                            │
-Docker socket  ──events thread ──▶ asyncio.Queue ──debounce──▶  reconciler ─┼─▶ diff_engine ─▶ HostSnapshot
-               ──inspect / run / rm ◀──────────────────────────────────────┘        │
-                                                                                      ▼
-SQLite (audit_log, pending_adoptions, whitelisted_entities, drift_events)   state_projector ─▶ SSE ─▶ dashboard
-```
+![DriftWarden architecture: one FastAPI process with the engine in the lifespan, the web control plane, SQLite, GitHub, the Docker socket and the browser](images/architecture.svg)
 
 Everything runs inside one FastAPI process: the engine lives in the application lifespan, the web layer reads the in-memory snapshot through a typed accessor, and SQLite holds only what must survive a restart.
 

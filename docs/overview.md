@@ -38,6 +38,8 @@ Everything is visible on a dashboard that updates live, every action is audited,
 destructive happens on its own unless the operator deliberately switches the mode to
 `enforce` and types a confirmation phrase.
 
+![DriftWarden in four steps: a manual change on the host, the event captured, the operator decides, the host is back in sync](../images/timeline.svg)
+
 ### Vocabulary
 
 | Term | Meaning |
@@ -63,11 +65,13 @@ For every container on the host, in this order:
 4. **Everything else is `ROGUE`** — including a container with perfect Compose labels for a
    service that Git does not declare. Labels state intent; Git decides legitimacy.
 
+![Zero-trust evaluation order: hard exclusions, whitelist, managed namespace, service mapping, field-by-field diff, and the PENDING_ADOPTION overlay](../images/evaluation-order.svg)
+
 ---
 
 ## 2. The workflow, end to end
 
-![DriftWarden end-to-end architecture workflow](../images/workflow.jpg)
+![DriftWarden end-to-end workflow: inputs, engine, state and logs, operator decisions and the two feedback loops](../images/workflow.svg)
 
 *Inputs (GitHub baseline, Docker socket) feed the reconciler; the diff engine compares the host
 snapshot with the declared configuration; state and logs go to the browser over SSE and to
@@ -136,9 +140,22 @@ Step by step:
    Enforce autonomously, with a 60-second per-entry cooldown so an unfixable service cannot
    cause a loop. `PENDING_ADOPTION` and whitelisted entries are never touched.
 
+### The same rules in pictures
+
+![Drift state machine: every state and the operator action or host event that moves a container between them](../images/state-machine.svg)
+
+*Solid arrows are operator actions or host events; dashed arrows are pull requests that did
+not land. In `enforce` mode the red Enforce arrows fire by themselves after the grace window.*
+
+![Two actions, two directions: Enforce makes the host match Git, Adopt makes Git match the host](../images/enforce-vs-adopt.svg)
+
+![Adopt lifecycle: drift detected, Adopt clicked, YAML synthesised, branch and pull request, the PENDING_ADOPTION buffer, and the four ways an entry leaves it](../images/adopt-lifecycle.svg)
+
 ---
 
 ## 3. Architecture in one process
+
+![DriftWarden architecture: one FastAPI process with the engine in the lifespan, the web control plane, SQLite, GitHub, the Docker socket and the browser](../images/architecture.svg)
 
 | Package | Role | Imports |
 | --- | --- | --- |
@@ -276,6 +293,18 @@ database URL (used by its tests).
 ### `scripts/clean.sh`
 
 Removes the three tool caches and every `__pycache__` directory.
+
+### Diagrams (`images/`)
+
+Every diagram in this documentation, and the logo, is generated: `images/src/<name>.py` draws
+it with the small helper in `images/src/draw.py` (plain Python, no dependencies) using the
+dashboard's own colour tones, and `images/*.svg` is the committed result. `images/*.png` are
+rasterised copies for places that cannot show SVG. After changing a generator:
+
+```
+python images/src/build.py     # rewrites images/*.svg
+node images/src/render.js      # rewrites images/*.png (Playwright Chromium; any SVG rasteriser works)
+```
 
 ### Tests (`tests/`)
 

@@ -38,6 +38,26 @@ INTERNAL_LABEL_PREFIXES: tuple[str, ...] = (
 
 UNSET = "<unset>"
 
+AWAITING_RESTART_MESSAGE = (
+    "Adopted into Git baseline. Workload is live and healthy, but attached to legacy "
+    "bridge network. Will join project network upon next restart."
+)
+"""Finding shown for an adopted workload that only lacks Compose networking or labels."""
+
+LEGACY_NETWORKS: frozenset[str] = frozenset({"bridge"})
+"""Docker's default networks a `docker run` container lands on."""
+
+
+def _only_legacy_network_drift(changed: list[str], container: LiveContainer) -> bool:
+    """True when image, ports and environment match and only the network differs.
+
+    A container that was adopted and merged, but never recreated by Compose, still
+    sits on the legacy ``bridge`` network instead of ``<project>_default``. That is
+    not drift the operator caused; it is waiting for a restart.
+    """
+    return changed == ["networks"] and set(container.networks) <= LEGACY_NETWORKS
+
+
 IMPLICIT_NETWORKS: frozenset[str] = frozenset({"default", "bridge", "host", "none"})
 """Networks never written to a reconstructed Compose service."""
 
@@ -494,13 +514,9 @@ def _managed_record(
         status = DriftStatus.PENDING_ADOPTION
         message = f"'{container.name}' is buffered while adoption PR #{pending.pr_number} deploys."
         actions = []
-    elif awaiting_restart:
+    elif awaiting_restart or _only_legacy_network_drift(changed, container):
         status = DriftStatus.AWAITING_RESTART
-        message = (
-            f"'{container.name}' is now declared in Git as service '{service.service_name}' "
-            "but still runs without Compose labels; restart it through Compose or press "
-            "Enforce to recreate it from the baseline."
-        )
+        message = AWAITING_RESTART_MESSAGE
         actions = ["revert"]
     elif changed:
         status = DriftStatus.DRIFTED

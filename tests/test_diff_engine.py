@@ -345,7 +345,7 @@ def test_adopted_rogue_becomes_awaiting_restart_after_merge(
     record = by_ref["rogue-db"]
     assert record.service_name == "rogue-db" and record.container_id == rogue_container.id
     assert record.actions == ["revert"]
-    assert "Compose labels" in record.message
+    assert "Will join project network upon next restart" in record.message
     assert statuses(result.records).get("rogue-db") == "awaiting_restart"
     assert "missing" not in statuses(result.records).values() or statuses(result.records)["web"]
 
@@ -367,3 +367,29 @@ def test_adopted_rogue_becomes_awaiting_restart_after_merge(
     result = evaluate([rogue_container], context(baseline))
     by_ref = {r.ref: r for r in result.records}
     assert by_ref["rogue-db"].drift_status is DriftStatus.ROGUE
+
+
+def test_network_only_drift_after_adoption_is_awaiting_restart(
+    baseline: Baseline, cache_container: LiveContainer
+) -> None:
+    from warden.engine.diff_engine import AWAITING_RESTART_MESSAGE
+
+    cache_container.networks = ["bridge"]  # adopted and merged, never recreated by Compose
+    result = evaluate([cache_container], context(baseline))
+    record = next(r for r in result.records if r.ref == cache_container.name)
+    assert record.drift_status is DriftStatus.AWAITING_RESTART
+    assert record.message == AWAITING_RESTART_MESSAGE
+    assert record.actions == ["revert"] and record.changed_fields == ["networks"]
+
+    # Anything else that differs is real drift, even with the bridge network.
+    cache_container.ports = ["6378:6378/tcp"]
+    result = evaluate([cache_container], context(baseline))
+    record = next(r for r in result.records if r.ref == cache_container.name)
+    assert record.drift_status is DriftStatus.DRIFTED
+
+    # A custom network that is not the legacy bridge is drift too.
+    cache_container.ports = ["6379:6379/tcp"]
+    cache_container.networks = ["some-other-net"]
+    result = evaluate([cache_container], context(baseline))
+    record = next(r for r in result.records if r.ref == cache_container.name)
+    assert record.drift_status is DriftStatus.DRIFTED

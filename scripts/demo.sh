@@ -11,8 +11,8 @@ case "$COMMAND" in
     
   drift)
     echo "🚨 Injecting chaos into the host environment..."
-    echo "1. Spawning a ROGUE container (unauthorized memcached, no compose labels, no env needed)..."
-    docker run -d --name rogue-memcached -p 11211:11211 memcached:alpine
+    echo "1. Spawning a ROGUE container (same nginx:alpine image as the web service, no compose labels, no env)..."
+    docker run -d --name rogue-web -p 8088:80 nginx:alpine
     
     echo "2. Deleting a required container to trigger MISSING state (web)..."
     docker rm -f infrastructure-test-web-1 || true
@@ -32,7 +32,7 @@ case "$COMMAND" in
   clean)
     echo "🧹 Wiping demo containers and resetting host..."
     docker compose -f tests/fixtures/docker-compose.test.yaml down
-    docker rm -f rogue-memcached rogue-db infrastructure-test-cache-1 infrastructure-test-web-1 2>/dev/null || true
+    docker rm -f rogue-web rogue-nginx rogue-memcached rogue-db infrastructure-test-cache-1 infrastructure-test-web-1 2>/dev/null || true
     docker network rm infrastructure-test_default 2>/dev/null || true
     echo "✅ Environment completely reset."
     ;;

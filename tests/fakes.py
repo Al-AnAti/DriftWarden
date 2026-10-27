@@ -60,6 +60,9 @@ class FakeWatcher:
             raise DockerConnectionError("daemon down")
         return list(self.containers)
 
+    def daemon_info(self) -> dict[str, Any]:
+        return {"Name": "fake-docker-host"}
+
     def inspect(self, id_or_name: str) -> LiveContainer | None:
         for container in self.containers:
             if container.id == id_or_name or container.name == id_or_name:

@@ -8,6 +8,12 @@
 #
 # The container name prefix "driftwarden" and its own container id are
 # automatically excluded from drift evaluation.
+#
+# Remediation uses the Docker SDK only (containers.create/start/stop/remove over
+# the mounted socket); no docker CLI or compose plugin is needed in the image.
+# Mount the host's /etc/hostname at /etc/host_hostname:ro (make start does on
+# Linux) or set WARDEN_HOSTNAME so the UI, audit rows and pull requests name
+# the real host rather than this container's id.
 
 FROM python:3.12-slim
 

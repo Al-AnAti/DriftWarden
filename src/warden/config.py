@@ -8,7 +8,14 @@ import socket
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from shared.constants import DEFAULT_EXCLUDED_NAME_PREFIXES
@@ -46,7 +53,8 @@ class WardenSettings(BaseSettings):
         api_port: Port used by the control plane.
         environment: Deployment environment name.
         log_level: Logging threshold consumed by application startup.
-        warden_hostname: Friendly host name shown in the UI and audit rows.
+        warden_hostname: Host identity shown in the UI, audit rows and PR bodies
+            (``WARDEN_HOSTNAME`` or ``WARDEN_HOST_NAME``); resolved at startup when unset.
         database_url: SQLite or compatible database URL.
         allow_mock_baseline: Explicitly permits mocked baseline loading locally.
         mock_baseline_path: Fixture path used when the baseline is mocked.
@@ -125,7 +133,9 @@ class WardenSettings(BaseSettings):
         validation_alias="ENVIRONMENT",
     )
     log_level: str = Field(default="INFO", min_length=1, validation_alias="LOG_LEVEL")
-    warden_hostname: str | None = Field(default=None, validation_alias="WARDEN_HOSTNAME")
+    warden_hostname: str | None = Field(
+        default=None, validation_alias=AliasChoices("WARDEN_HOSTNAME", "WARDEN_HOST_NAME")
+    )
     database_url: str = Field(
         default="sqlite:///./warden.db",
         min_length=1,
@@ -204,7 +214,12 @@ class WardenSettings(BaseSettings):
 
     @property
     def hostname(self) -> str:
-        """Friendly host name: ``WARDEN_HOSTNAME`` or the machine hostname."""
+        """Host identity: ``WARDEN_HOSTNAME`` / ``WARDEN_HOST_NAME``, else the resolved name.
+
+        The application lifespan stores the cascade result from
+        ``warden.core.host_identity.resolve_host_identity`` in ``warden_hostname``, so
+        this property is the single place everything (UI, audit, PR bodies) reads.
+        """
         return self.warden_hostname or socket.gethostname()
 
     @property

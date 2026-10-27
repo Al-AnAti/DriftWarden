@@ -48,6 +48,12 @@ case "${1:-}" in
     mkdir -p "$DATA_DIR"
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     DATA_HOST="$(host_path "$ROOT/$DATA_DIR")"
+    # On a Linux host, hand the real hostname to the container (second step of the
+    # host-identity cascade); Docker Desktop hosts fall back to the daemon name.
+    HOSTNAME_MOUNT=()
+    if [ -r /etc/hostname ] && [ -z "${MSYSTEM:-}" ] && [ "$(uname -s)" = "Linux" ]; then
+      HOSTNAME_MOUNT=(-v /etc/hostname:/etc/host_hostname:ro)
+    fi
     echo "🚀 Starting $CONTAINER on http://localhost:$PORT (database in $DATA_DIR/warden.db) ..."
     docker run -d --name "$CONTAINER" \
       -p "$PORT:8000" \
@@ -58,6 +64,7 @@ case "${1:-}" in
       -e DOCKER_SOCKET_PATH=/var/run/docker.sock \
       -v "$SOCKET" \
       -v "$DATA_HOST:/data" \
+      "${HOSTNAME_MOUNT[@]}" \
       "$IMAGE" >/dev/null
     echo "✅ $CONTAINER is up. Logs: make logs  Stop: make stop"
     ;;

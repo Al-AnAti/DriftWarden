@@ -383,6 +383,21 @@ class DockerWatcher:
                 self._client = None
             self.connected = False
 
+    def daemon_info(self) -> dict[str, Any]:
+        """``docker info`` of the connected daemon (its ``Name`` is the real host name).
+
+        Raises:
+            DockerConnectionError: If the daemon cannot be reached.
+        """
+        try:
+            info = self.connect().info()
+        except DockerConnectionError:
+            raise
+        except DockerException as exc:
+            self._reset(str(exc))
+            raise DockerConnectionError(f"Docker info failed: {exc}") from exc
+        return dict(info) if isinstance(info, dict) else {}
+
     # ------------------------------------------------------------- inspection
 
     def list_containers(self) -> list[LiveContainer]:

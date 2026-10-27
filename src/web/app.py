@@ -6,6 +6,7 @@ the reconciler together, publishes them on ``app.state.warden`` and tears
 everything down on shutdown.
 """
 
+import asyncio
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from shared.exceptions import DriftWardenError
 from warden.automation.github_client import GitHubClient
 from warden.config import WardenSettings, get_settings
 from warden.core.docker_watcher import DockerWatcher
+from warden.core.host_identity import resolve_host_identity
 from warden.engine.reconciler import Reconciler
 from warden.engine.state_projector import StateProjector
 from web.db.repository import Store
@@ -51,11 +53,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings)
     logger.info("Starting DriftWarden control plane: {}", settings)
 
+    watcher = DockerWatcher(settings)
+    hostname, source = await asyncio.to_thread(
+        resolve_host_identity, settings.warden_hostname, watcher.daemon_info
+    )
+    settings.warden_hostname = hostname
+    logger.info("Host identity: {} (from {})", hostname, source)
+
     database = Database(settings.database_url)
     database.init()
     store = Store(database, settings.hostname)
     projector = StateProjector(settings.hostname, settings.warden_mode)
-    watcher = DockerWatcher(settings)
     github = None if settings.allow_mock_baseline else GitHubClient(settings)
     reconciler = Reconciler(settings, watcher, store, projector, github)
     app.state.warden = WardenRuntime(
@@ -96,6 +104,19 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=409,
             content={"ok": False, "error": exc.__class__.__name__, "message": str(exc)},
+        )
+
+    @application.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        """Unexpected failures (Docker SDK, GitHub, bugs) reach the UI as a readable banner."""
+        logger.exception("Unhandled error on {} {}: {}", request.method, request.url.path, exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ok": False,
+                "error": exc.__class__.__name__,
+                "message": f"{exc.__class__.__name__}: {exc}",
+            },
         )
 
     return application

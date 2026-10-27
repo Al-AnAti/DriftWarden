@@ -762,10 +762,30 @@ class Reconciler:
                 declared_volumes=self.baseline.declared_volumes,
             )
         except (ContainerRecreateError, RogueContainerKillError, DockerConnectionError) as exc:
+            logger.exception(
+                "Enforce failed for {} (recreate {}): {}", record.ref, service.service_name, exc
+            )
             await asyncio.to_thread(
                 self.store.record_audit, AuditAction.REVERT_FAILED, record.ref, str(exc)
             )
             raise
+        except Exception as exc:  # never let a Docker SDK surprise vanish silently
+            logger.exception(
+                "Enforce failed for {} (recreate {}): {}", record.ref, service.service_name, exc
+            )
+            await asyncio.to_thread(
+                self.store.record_audit, AuditAction.REVERT_FAILED, record.ref, repr(exc)
+            )
+            raise ContainerRecreateError(
+                f"Enforce failed for {record.ref}: {exc.__class__.__name__}: {exc}"
+            ) from exc
+        logger.info(
+            "Enforce recreated {} as {} ({}) for {}",
+            service.service_name,
+            target_name,
+            new_id[:12],
+            record.ref,
+        )
         self._remember_action(new_id)
         await asyncio.to_thread(
             self.store.record_audit,
@@ -800,10 +820,20 @@ class Reconciler:
         try:
             await asyncio.to_thread(self.watcher.stop_and_remove, record.container_id)
         except (RogueContainerKillError, DockerConnectionError) as exc:
+            logger.exception("Enforce failed for {} (remove): {}", record.ref, exc)
             await asyncio.to_thread(
                 self.store.record_audit, AuditAction.ENFORCE_KILL_FAILED, record.ref, str(exc)
             )
             raise
+        except Exception as exc:  # never let a Docker SDK surprise vanish silently
+            logger.exception("Enforce failed for {} (remove): {}", record.ref, exc)
+            await asyncio.to_thread(
+                self.store.record_audit, AuditAction.ENFORCE_KILL_FAILED, record.ref, repr(exc)
+            )
+            raise RogueContainerKillError(
+                f"Enforce failed for {record.ref}: {exc.__class__.__name__}: {exc}"
+            ) from exc
+        logger.info("Enforce removed {} ({})", record.container_name, record.ref)
         await asyncio.to_thread(
             self.store.record_audit,
             AuditAction.ENFORCE_KILL,

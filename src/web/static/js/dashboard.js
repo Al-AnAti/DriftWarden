@@ -29,6 +29,14 @@
 
     function toast(message, tone) { toastInto("toasts", message, tone); }
 
+    /* Persistent error banner for failed operator actions (toasts fade; this stays until dismissed). */
+    function showActionError(message) {
+        const banner = document.getElementById("banner-action");
+        if (!banner) return;
+        setText("banner-action-text", message);
+        banner.classList.remove("hidden");
+    }
+
     /* Queue a toast to be shown on the next page (used around redirects). */
     function flash(message, tone) {
         try { sessionStorage.setItem(FLASH_KEY, JSON.stringify({ message, tone })); } catch (e) { /* storage blocked */ }
@@ -377,13 +385,18 @@
         }
     }
 
+    let lastSignature = null;
+
     function apply(payload, announce) {
         const snapshot = payload.snapshot;
         const previousOverall = W.snapshot ? W.snapshot.overall : null;
         W.snapshot = snapshot;
         W.version = payload.version;
         renderChrome(snapshot);
-        if (W.page === "dashboard") renderDashboard(snapshot);
+        /* Repaint the table only when something visible changed; identical cycles cost nothing. */
+        const signature = JSON.stringify([snapshot.records, snapshot.overall, snapshot.mode, snapshot.enforcement_active, snapshot.exempt]);
+        if (W.page === "dashboard" && signature !== lastSignature) renderDashboard(snapshot);
+        lastSignature = signature;
         renderDiffPage(snapshot);
         /* Engine events are not toasted (visual clutter); the status pill and the chimes carry them. */
         if (announce) chimeForTransition(previousOverall, snapshot.overall);
@@ -391,9 +404,18 @@
 
     /* --------------------------------------------------------------- SSE */
 
+    /* One live connection per page. It is closed before any navigation and while the tab is
+       hidden, so rapid tab switching never piles up SSE sockets (browsers allow only a few
+       connections per host) and background tabs do not keep repainting. */
+    let source = null;
+
+    function disconnect() {
+        if (source) { source.close(); source = null; }
+    }
+
     function connect() {
-        if (!window.EventSource) return;
-        const source = new EventSource("/api/state/stream");
+        if (!window.EventSource || source || document.hidden) return;
+        source = new EventSource("/api/state/stream");
         const indicator = document.getElementById("live-indicator");
         let first = true;
         source.addEventListener("snapshot", (event) => {
@@ -405,14 +427,39 @@
         source.onerror = () => { if (indicator) { indicator.textContent = "reconnecting…"; indicator.className = "text-amber-400"; } };
     }
 
+    /* In-flight action requests are aborted when the page is left, so a slow Docker call
+       from the previous tab cannot block the next one. */
+    const inflight = new Set();
+
+    function abortInflight() {
+        inflight.forEach((controller) => controller.abort());
+        inflight.clear();
+    }
+
+    function navigationHygiene() {
+        window.addEventListener("pagehide", () => { disconnect(); abortInflight(); });
+        document.addEventListener("visibilitychange", () => { if (document.hidden) disconnect(); else connect(); });
+        document.querySelectorAll("a[data-nav]").forEach((link) => {
+            link.addEventListener("click", () => { disconnect(); abortInflight(); });
+        });
+    }
+
     /* ----------------------------------------------------------- actions */
 
     async function post(url, body, method) {
-        const response = await fetch(url, {
-            method: method || "POST",
-            headers: { "Content-Type": "application/json" },
-            body: body === undefined ? undefined : JSON.stringify(body),
-        });
+        const controller = new AbortController();
+        inflight.add(controller);
+        let response;
+        try {
+            response = await fetch(url, {
+                method: method || "POST",
+                headers: { "Content-Type": "application/json" },
+                body: body === undefined ? undefined : JSON.stringify(body),
+                signal: controller.signal,
+            });
+        } finally {
+            inflight.delete(controller);
+        }
         let data = {};
         try { data = await response.json(); } catch (e) { /* no body */ }
         if (!response.ok) {
@@ -424,7 +471,13 @@
     const ACTIONS = {
         revert: {
             title: "Enforce",
-            message: (ref) => "Make the host match Git: recreate '" + ref + "' exactly as declared in the baseline?",
+            message: (ref) => {
+                const record = findRecord(ref);
+                if (record && record.drift_status === "awaiting_restart") {
+                    return "'" + ref + "' already matches Git on image, ports and environment. Enforce recreates it so it joins the Compose project network and carries the Compose labels; its runtime configuration is not modified.";
+                }
+                return "Make the host match Git: recreate '" + ref + "' exactly as declared in the baseline?";
+            },
             confirmText: "Enforce",
             danger: true,
             progress: (ref) => "Enforcing " + ref + "…",
@@ -485,7 +538,9 @@
             }
             toast(result.message, "emerald");
         } catch (err) {
+            if (err.name === "AbortError") return;
             toast(spec.title + " failed: " + err.message, "rose");
+            showActionError(spec.title + " on " + ref + " failed: " + err.message);
         }
     };
 
@@ -565,7 +620,9 @@
             toast((isEnforce ? "Enforce All" : "Adopt All") + ": " + result.succeeded + " succeeded, " + result.failed + " failed" + prNote, failed.length ? "amber" : "emerald");
             failed.slice(0, 3).forEach((r) => toast(r.target + ": " + r.message, "rose"));
         } catch (err) {
+            if (err.name === "AbortError") return;
             toast("Batch failed: " + err.message, "rose");
+            showActionError((isEnforce ? "Enforce All" : "Adopt All") + " failed: " + err.message);
         }
     };
 
@@ -716,6 +773,7 @@
 
     modalInit();
     chimeInit();
+    navigationHygiene();
     showFlash();
     if (W.snapshot) renderChrome(W.snapshot);
     connect();

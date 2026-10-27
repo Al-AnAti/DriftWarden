@@ -28,7 +28,7 @@ def client(
 ) -> Iterator[TestClient]:
     fake_watcher.containers = [web_container, drifted_cache, rogue_container]
     monkeypatch.setattr(web_app, "DockerWatcher", lambda settings: fake_watcher)
-    with TestClient(web_app.app) as test_client:
+    with TestClient(web_app.app, raise_server_exceptions=False) as test_client:
         yield test_client
 
 
@@ -234,3 +234,19 @@ def test_batch_missing_scope_and_consolidated_adopt_refused_without_github(
     assert "Spin up" not in page and ">Kill<" not in page and ">Revert<" not in page
     assert 'src="/static/img/logo.png"' in page and "Awaiting restart" in page
     assert "🔄 Refresh" in client.get("/events").text
+
+
+def test_unexpected_errors_reach_the_ui_as_json(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = web_app.app.state.warden
+
+    async def boom(ref: str) -> None:
+        raise RuntimeError("socket write refused")
+
+    monkeypatch.setattr(runtime.reconciler, "revert", boom)
+    response = client.post(f"/api/actions/revert/{PROJECT}-cache-1")
+    assert response.status_code == 500
+    body = response.json()
+    assert body["ok"] is False and "socket write refused" in body["message"]
+    assert 'id="banner-action"' in client.get("/").text

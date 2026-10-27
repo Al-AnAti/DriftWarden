@@ -130,9 +130,15 @@ Step by step:
    the generated YAML deliberately carries no `container_name` so Compose keeps control of
    naming and `--scale`. The diff engine recognises a running unlabelled container whose
    sanitised name is a declared service with no labelled instance and shows it as
-   `AWAITING_RESTART` instead of rogue-plus-missing. `docker compose up` on the host, or
-   **Enforce**, recreates it with its labels and it becomes `MATCHED`. In enforce mode the
-   engine does that itself after the grace window.
+   `AWAITING_RESTART` instead of rogue-plus-missing. The same state covers a labelled,
+   adopted container that now matches Git on image, ports and environment but is still
+   attached only to the legacy `bridge` network instead of `<project>_default`: that is not
+   reported as `DRIFTED`. `docker compose up` on the host, or **Enforce**, recreates it with
+   its labels on the project network, without changing its runtime configuration, and it
+   becomes `MATCHED`. In enforce mode the engine does that itself after the grace window.
+   The host name shown everywhere comes from `WARDEN_HOSTNAME`, else the mounted
+   `/etc/host_hostname`, else the Docker daemon's name, else `platform.node()`, so a
+   containerised DriftWarden never reports its own container id as the host.
 9. **Enforce mode.** Switching the mode on Cluster Config requires typing `ENABLE AUTONOMOUS`.
    After the grace window (`ENFORCEMENT_GRACE_SECONDS`, re-armed on every baseline change and
    on the switch itself), every cycle that finds ROGUE / DRIFTED / MISSING / AWAITING_RESTART
@@ -268,7 +274,7 @@ and `cache` (`redis:alpine`, 6379→6379), both labelled `warden.managed=true` a
 | Command | What happens on the host | What the dashboard shows |
 | --- | --- | --- |
 | `up` | `docker compose -f tests/fixtures/docker-compose.test.yaml up -d` | two `Matched` rows, `IN SYNC` |
-| `drift` | 1. `docker run -d --name rogue-memcached -p 11211:11211 memcached:alpine` with no labels and no environment variables. 2. `docker rm -f infrastructure-test-web-1`. 3. Recreates `infrastructure-test-cache-1` with the right Compose labels but `redis:alpine` on port `6378:6378`, `warden.managed=false`, `warden.repo=not-my-cs-project` and the default bridge network. | `rogue-memcached` **Rogue**, `web` **Missing** (*declared in Git, not running*), `infrastructure-test-cache-1` **Drifted** on `ports`, `labels`, `networks`; the status pill goes `DRIFT DETECTED` and the warning chime plays. From here: **Enforce** the cache (recreate), **Enforce** web (create), **Enforce** (remove) or **Adopt** (pull request) the memcached. After that PR merges, the memcached shows **Awaiting restart** until `docker compose up` or Enforce recreates it with labels. |
+| `drift` | 1. `docker run -d --name rogue-web -p 8088:80 nginx:alpine` with no labels and no environment variables (the same image the `web` service uses, so adoption needs no credentials). 2. `docker rm -f infrastructure-test-web-1`. 3. Recreates `infrastructure-test-cache-1` with the right Compose labels but `redis:alpine` on port `6378:6378`, `warden.managed=false`, `warden.repo=not-my-cs-project` and the default bridge network. | `rogue-web` **Rogue**, `web` **Missing** (*declared in Git, not running*), `infrastructure-test-cache-1` **Drifted** on `ports`, `labels`, `networks`; the status pill goes `DRIFT DETECTED` and the warning chime plays. From here: **Enforce** the cache (recreate), **Enforce** web (create), **Enforce** (remove) or **Adopt** (pull request) `rogue-web`. After that PR merges, `rogue-web` shows **Awaiting restart** until `docker compose up` or Enforce recreates it with labels on the project network. |
 | `clean` | `docker compose down`, force-removes the three containers, removes the `infrastructure-test_default` network. | back to empty / missing until `up` again |
 
 ### `scripts/reset_logs.py`

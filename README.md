@@ -33,7 +33,7 @@ Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker ru
 | `MISSING` | Declared service has no container, or only a stopped / exited one. |
 | `ROGUE` | Container not declared in Git: unlabelled, from another Compose project, spoofed labels, or a duplicate replica. |
 | `PENDING_ADOPTION` | Buffered while an adoption pull request deploys. |
-| `AWAITING_RESTART` | An adopted rogue container whose pull request has merged: Git now declares it, but it still runs without Compose labels. `docker compose up` (or Enforce) recreates it and it becomes `MATCHED`. |
+| `AWAITING_RESTART` | An adopted workload whose pull request has merged and that now matches Git on image, ports and environment, but still runs without Compose labels or on the legacy `bridge` network instead of the project network. `docker compose up` (or Enforce) recreates it and it becomes `MATCHED`. |
 
 ### Evaluation order
 
@@ -127,7 +127,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `EXCLUDED_NAME_PREFIXES` | `warden-,driftwarden,k8s_` | Containers never evaluated. |
 | `DOCKER_SOCKET_PATH` / `DOCKER_BASE_URL` | `/var/run/docker.sock` / unset | Socket path, or an explicit `npipe://` / `tcp://` URL; otherwise `docker.from_env()`. |
 | `DATABASE_URL` | `sqlite:///./warden.db` | Audit log, buffer, whitelist and drift events (WAL mode). |
-| `WARDEN_HOSTNAME` | machine hostname | Friendly name shown in the UI and stamped on audit rows. |
+| `WARDEN_HOSTNAME` (alias `WARDEN_HOST_NAME`) | resolved | Host identity shown in the UI, audit rows and PR bodies. Resolution order: this variable, then `/etc/host_hostname` (the host's `/etc/hostname` mounted read-only, which `make start` does on Linux), then the Docker daemon's own name from `docker info`, then `platform.node()`; inside a container the last one would be the container id, which is why the cascade exists. |
 
 ## 🖥️ Control plane
 
@@ -161,8 +161,8 @@ Conventions: Python 3.10 syntax floor, `X | None` unions, Pydantic at every boun
 
 ```bash
 make demo-up         # docker compose up the fixture stack (project infrastructure-test)
-make demo-drift      # rogue memcached:alpine on 11211 (no env needed), delete web (MISSING), spoofed cache (DRIFTED)
+make demo-drift      # rogue-web (nginx:alpine on 8088:80, no env needed), delete web (MISSING), spoofed cache (DRIFTED)
 make demo-down       # tear everything down
 ```
 
-With the dashboard open, `make demo-drift` shows one `ROGUE`, one `MISSING` and one `DRIFTED` entry within the debounce window. Click **Enforce** on the cache to recreate it from Git, **Enforce** on `web` to spin it up, or **Adopt** on the rogue memcached to open a pull request on `TARGET_REPO`; once that PR merges the container shows as `AWAITING_RESTART` until Compose or Enforce recreates it with its labels.
+With the dashboard open, `make demo-drift` shows one `ROGUE`, one `MISSING` and one `DRIFTED` entry within the debounce window. Click **Enforce** on the cache to recreate it from Git, **Enforce** on `web` to spin it up, or **Adopt** on `rogue-web` to open a pull request on `TARGET_REPO`; once that PR merges the container shows as `AWAITING_RESTART` until Compose or Enforce recreates it with its labels and project network.

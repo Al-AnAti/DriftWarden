@@ -33,7 +33,7 @@ Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker ru
 | `MISSING` | Declared service has no container, or only a stopped / exited one. |
 | `ROGUE` | Container not declared in Git: unlabelled, from another Compose project, spoofed labels, or a duplicate replica. |
 | `PENDING_ADOPTION` | Buffered while an adoption pull request deploys. |
-| `AWAITING_RESTART` | An adopted workload whose pull request has merged and that now matches Git on image, ports and environment, but still runs without Compose labels or on the legacy `bridge` network instead of the project network. `docker compose up` (or Enforce) recreates it and it becomes `MATCHED`. |
+| `AWAITING_RESTART` | Strictly post-adoption: the exact container instance (by id) whose pull request merged, now declared in Git and matching it on image, ports, environment, volumes, labels and restart policy. The only tolerated differences are the legacy `bridge` network and missing Compose labels. `docker compose up` (or Enforce) recreates it and it becomes `MATCHED`. A container recreated by hand, even with the same name, is a new instance and is judged as `ROGUE` or `DRIFTED` on its own merits. |
 
 ### Evaluation order
 

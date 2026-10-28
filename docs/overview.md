@@ -130,10 +130,18 @@ Step by step:
    the generated YAML deliberately carries no `container_name` so Compose keeps control of
    naming and `--scale`. The diff engine recognises a running unlabelled container whose
    sanitised name is a declared service with no labelled instance and shows it as
-   `AWAITING_RESTART` instead of rogue-plus-missing. The same state covers a labelled,
-   adopted container that now matches Git on image, ports and environment but is still
-   attached only to the legacy `bridge` network instead of `<project>_default`: that is not
-   reported as `DRIFTED`. `docker compose up` on the host, or **Enforce**, recreates it with
+   `AWAITING_RESTART` instead of rogue-plus-missing, **but only when it is the exact
+   instance that was adopted**: when a pull request merges, the buffer entry's container id
+   is recorded in `adopted_instances`, and only that id can enter the state. It must also
+   match the merged service strictly (image, ports, environment, volumes, labels, restart);
+   the only tolerated differences are the legacy `bridge` network and the missing Compose
+   labels (environment keys the baseline declares as `${KEY}` with `KEY` unset where
+   DriftWarden runs are deploy-time values and are not compared). A container deleted and
+   recreated by hand gets a new id, its adoption record is
+   invalidated, and it is judged as a fresh workload: a changed host port makes it `ROGUE`
+   (SHADOW IT) again. The same gate covers a labelled, adopted container that is still
+   attached only to the legacy `bridge` network instead of `<project>_default`: that is
+   not reported as `DRIFTED`. `docker compose up` on the host, or **Enforce**, recreates it with
    its labels on the project network, without changing its runtime configuration, and it
    becomes `MATCHED`. In enforce mode the engine does that itself after the grace window.
    The host name shown everywhere comes from `WARDEN_HOSTNAME`, else the mounted

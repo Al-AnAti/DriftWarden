@@ -132,6 +132,58 @@ def interpolate(value: str, environ: Mapping[str, str] | None = None) -> str:
     return _INTERPOLATION.sub(replace, value)
 
 
+def has_unresolved_reference(value: str, environ: Mapping[str, str] | None = None) -> bool:
+    """True when ``value`` references a variable that is unset and has no default.
+
+    Args:
+        value: Raw scalar before interpolation.
+        environ: Variable source, defaulting to the process environment.
+
+    Returns:
+        Whether at least one ``${VAR}`` / ``$VAR`` cannot be resolved here.
+    """
+    source = os.environ if environ is None else environ
+    for match in _INTERPOLATION.finditer(value):
+        if match.group("escaped"):
+            continue
+        name = match.group("braced") or match.group("named")
+        if match.group("default") is not None:
+            continue
+        if source.get(name) is None:
+            return True
+    return False
+
+
+def unresolved_environment_keys(node: Any, environ: Mapping[str, str] | None = None) -> set[str]:
+    """Environment keys whose declared value cannot be resolved where DriftWarden runs.
+
+    Args:
+        node: The raw ``environment:`` block (mapping or list).
+        environ: Variable source, defaulting to the process environment.
+
+    Returns:
+        Keys such as ``MARIADB_ROOT_PASSWORD`` declared as ``${MARIADB_ROOT_PASSWORD}``.
+    """
+    source = os.environ if environ is None else environ
+    keys: set[str] = set()
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            if value is None and source.get(str(key)) is None:
+                keys.add(str(key))
+            elif isinstance(value, str) and has_unresolved_reference(value, environ):
+                keys.add(str(key))
+    elif isinstance(node, list):
+        for item in node:
+            text = str(item)
+            key, sep, value = text.partition("=")
+            if not sep:
+                if source.get(key.strip()) is None:
+                    keys.add(key.strip())
+            elif has_unresolved_reference(value, environ):
+                keys.add(key.strip())
+    return keys
+
+
 def _scalar(value: Any, environ: Mapping[str, str] | None) -> str:
     """Render any YAML scalar as an interpolated string."""
     if isinstance(value, bool):
@@ -335,6 +387,7 @@ def normalise_service(
         restart=_scalar(restart, environ) if restart is not None else None,
         networks=normalise_networks(node.get("networks"), environ),
         container_name=_scalar(container_name, environ) if container_name is not None else None,
+        unresolved_env=unresolved_environment_keys(node.get("environment"), environ),
     )
 
 

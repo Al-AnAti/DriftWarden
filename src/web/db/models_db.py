@@ -92,3 +92,19 @@ class SettingOverrideRow(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AdoptedInstanceRow(Base):
+    """A container instance whose adoption pull request merged.
+
+    Bound to the exact container id inspected when the PR was generated; a new
+    container with the same name is a different instance and never inherits it.
+    """
+
+    __tablename__ = "adopted_instances"
+
+    container_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    service_name: Mapped[str] = mapped_column(String(255), index=True)
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    adopted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -14,6 +14,7 @@ from shared.constants import AuditAction, DriftStatus, WhitelistTargetType
 from shared.exceptions import DatabaseWriteError
 from shared.models import AuditLogEntry, PendingAdoption, WhitelistEntry
 from web.db.models_db import (
+    AdoptedInstanceRow,
     AuditLogRow,
     DriftEventRow,
     PendingAdoptionRow,
@@ -318,6 +319,52 @@ class Store:
             }
             for row in rows
         ]
+
+    # ---------------------------------------------------- adopted instances
+
+    def add_adopted_instance(
+        self, container_id: str, service_name: str, pr_number: int | None
+    ) -> None:
+        """Remember that this exact container instance was adopted (PR merged)."""
+        try:
+            with self._db.write() as session:
+                row = session.get(AdoptedInstanceRow, container_id)
+                if row is None:
+                    session.add(
+                        AdoptedInstanceRow(
+                            container_id=container_id,
+                            service_name=service_name,
+                            pr_number=pr_number,
+                            adopted_at=datetime.now(timezone.utc),
+                        )
+                    )
+                else:
+                    row.service_name = service_name
+                    row.pr_number = pr_number
+                    row.adopted_at = datetime.now(timezone.utc)
+                    row.invalidated_at = None
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot record adopted instance: {exc}") from exc
+
+    def list_adopted_instances(self) -> dict[str, str]:
+        """Active adopted instances: container id -> service name."""
+        with self._db.session() as session:
+            rows = session.scalars(
+                select(AdoptedInstanceRow).where(AdoptedInstanceRow.invalidated_at.is_(None))
+            ).all()
+        return {row.container_id: row.service_name for row in rows}
+
+    def invalidate_adopted_instance(self, container_id: str) -> None:
+        """The instance is gone; a same-named newcomer must not inherit the adoption."""
+        try:
+            with self._db.write() as session:
+                session.execute(
+                    update(AdoptedInstanceRow)
+                    .where(AdoptedInstanceRow.container_id == container_id)
+                    .values(invalidated_at=datetime.now(timezone.utc))
+                )
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot invalidate adopted instance: {exc}") from exc
 
     # ------------------------------------------------------------- settings
 

@@ -134,6 +134,9 @@ class AuditAction(str, Enum):
     ENGINE_STARTED = "engine_started"
     """The reconciliation engine finished its startup pass."""
 
+    ADOPTION_INVALIDATED = "adoption_invalidated"
+    """The container instance an adoption was bound to no longer exists."""
+
     ADOPTION_REVOKED = "adoption_revoked"
     """An operator revoked a buffered adoption; its pull request was closed."""
 

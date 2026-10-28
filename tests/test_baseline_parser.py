@@ -148,3 +148,25 @@ def test_render_service_yaml_roots_at_service_name(baseline: Baseline) -> None:
     assert text.startswith("cache:\n")
     assert "image: redis:alpine" in text
     assert "6379:6379/tcp" in text
+
+
+def test_unresolved_environment_placeholders_are_tracked() -> None:
+    raw = (
+        "name: p\nservices:\n  db:\n    image: mariadb:latest\n    environment:\n"
+        "      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}\n      - MODE=${MODE:-prod}\n"
+        "      - FIXED=1\n      - FROM_ENV\n"
+    )
+    parsed = parse_baseline(
+        raw, fallback_namespace=None, sha=None, source=BaselineSource.MOCK, environ={}
+    )
+    service = parsed.services["db"]
+    assert service.unresolved_env == {"MARIADB_ROOT_PASSWORD", "FROM_ENV"}
+    assert service.environment["MODE"] == "prod" and service.environment["FIXED"] == "1"
+    resolved = parse_baseline(
+        raw,
+        fallback_namespace=None,
+        sha=None,
+        source=BaselineSource.MOCK,
+        environ={"MARIADB_ROOT_PASSWORD": "s3cret", "FROM_ENV": "x"},
+    )
+    assert resolved.services["db"].unresolved_env == set()

@@ -195,6 +195,7 @@ class Reconciler:
         self._image_env_cache: dict[str, dict[str, str]] = {}
         self._image_labels_cache: dict[str, dict[str, str]] = {}
         self._pending: dict[str, PendingAdoption] = {}
+        self._adopted: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
         self._environment_defaults: dict[str, object] = {}
         self._whitelist = WhitelistIndex()
@@ -249,6 +250,7 @@ class Reconciler:
                 index.containers.add(entry.target_identifier)
         self._whitelist = index
         self._pending = {p.container_id: p for p in self.store.active_pending()}
+        self._adopted = dict(self.store.list_adopted_instances())
 
     # ------------------------------------------------------------- baseline
 
@@ -398,6 +400,7 @@ class Reconciler:
                     f"service {pending.service_name} {why}",
                 )
                 self._pending.pop(pending.container_id, None)
+                await self._remember_adopted(pending)
         if self.startup_done:
             self.schedule_reconcile("baseline")
 
@@ -474,7 +477,37 @@ class Reconciler:
                 if pending.pr_state == "merged":
                     await asyncio.to_thread(self.store.clear_pending, pending.id, "pr_merged")
                     self._pending.pop(pending.container_id, None)
+                    await self._remember_adopted(pending)
             self.schedule_reconcile("pr-merged")
+
+    async def _remember_adopted(self, pending: PendingAdoption) -> None:
+        """Bind a completed adoption to the exact container instance it was made for."""
+        if pending.kind == "remove":
+            return
+        await asyncio.to_thread(
+            self.store.add_adopted_instance,
+            pending.container_id,
+            pending.service_name,
+            pending.pr_number,
+        )
+        self._adopted[pending.container_id] = pending.service_name
+
+    async def _prune_adopted(self, containers: list[LiveContainer]) -> None:
+        """Forget adopted instances that no longer exist on the host.
+
+        A container recreated by hand gets a new id and is a fresh entity: it never
+        inherits the adoption of the instance that was inspected for the PR.
+        """
+        live = {c.id for c in containers}
+        for container_id in [cid for cid in self._adopted if cid not in live]:
+            service = self._adopted.pop(container_id)
+            await asyncio.to_thread(self.store.invalidate_adopted_instance, container_id)
+            await asyncio.to_thread(
+                self.store.record_audit,
+                AuditAction.ADOPTION_INVALIDATED,
+                service,
+                f"adopted instance {container_id[:12]} no longer exists",
+            )
 
     async def _sweep_loop(self) -> None:
         while not self._stop.is_set():
@@ -560,6 +593,7 @@ class Reconciler:
             self_container_id=self.watcher.self_container_id,
             whitelist=self._whitelist,
             pending=dict(self._pending),
+            adopted=dict(self._adopted),
             image_environment=self._image_environment,
             image_labels=self._image_labels,
         )
@@ -582,6 +616,7 @@ class Reconciler:
                 containers = await asyncio.to_thread(self.watcher.list_containers)
                 self.docker_connected = True
                 self.docker_error = None
+                await self._prune_adopted(containers)
             except DockerConnectionError as exc:
                 self.docker_connected = False
                 self.docker_error = str(exc)

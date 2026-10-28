@@ -100,6 +100,9 @@ class EvaluationContext:
         self_container_id: DriftWarden's own container id, if containerised.
         whitelist: Operator exemptions.
         pending: Active adoption buffer entries keyed by container id.
+        adopted: Container ids whose adoption pull request merged, mapped to the
+            service that was written for them. Only these instances can be
+            ``AWAITING_RESTART``; everything else is judged on its own merits.
         image_environment: Lookup of image-default environment by image id.
         image_labels: Lookup of image-default labels by image id.
     """
@@ -110,6 +113,7 @@ class EvaluationContext:
     self_container_id: str | None = None
     whitelist: WhitelistIndex = field(default_factory=WhitelistIndex)
     pending: dict[str, PendingAdoption] = field(default_factory=dict)
+    adopted: dict[str, str] = field(default_factory=dict)
     image_environment: Callable[[str], dict[str, str]] = lambda _: {}
     image_labels: Callable[[str], dict[str, str]] = lambda _: {}
 
@@ -353,9 +357,19 @@ def compare(service: ParsedService, container: LiveContainer, project: str) -> l
             diffs.append(
                 FieldDiff(
                     field=name,
-                    expected=_join(f"{k}={v}" for k, v in expected_env.items()) or "(none)",
+                    expected=_join(
+                        f"{k}={'${' + k + '}' if k in service.unresolved_env else v}"
+                        for k, v in expected_env.items()
+                    )
+                    or "(none)",
                     observed=_join(f"{k}={v}" for k, v in observed_env.items()) or "(none)",
-                    changed=any(observed_env[k] != v for k, v in expected_env.items()),
+                    # Keys declared as ${VAR} with VAR unset here are supplied at deploy
+                    # time (adoption writes them that way); they cannot be judged.
+                    changed=any(
+                        observed_env[k] != v
+                        for k, v in expected_env.items()
+                        if k not in service.unresolved_env
+                    ),
                 )
             )
         elif name == "volumes":
@@ -514,7 +528,9 @@ def _managed_record(
         status = DriftStatus.PENDING_ADOPTION
         message = f"'{container.name}' is buffered while adoption PR #{pending.pr_number} deploys."
         actions = []
-    elif awaiting_restart or _only_legacy_network_drift(changed, container):
+    elif awaiting_restart or (
+        container.id in context.adopted and _only_legacy_network_drift(changed, container)
+    ):
         status = DriftStatus.AWAITING_RESTART
         message = AWAITING_RESTART_MESSAGE
         actions = ["revert"]
@@ -594,16 +610,37 @@ def evaluate(containers: list[LiveContainer], context: EvaluationContext) -> Eva
         else:
             unlabelled.append(container)
 
-    # An adopted rogue container whose pull request has merged: Git now declares a
-    # service named after it, but nothing with Compose labels runs yet. Until Compose
-    # (or Enforce) recreates it, it is AWAITING_RESTART rather than rogue + missing.
+    # AWAITING_RESTART is strictly a post-adoption state: the container must be the
+    # exact instance whose adoption pull request merged (tracked by container id), the
+    # merged baseline must declare its service with no Compose-labelled instance yet,
+    # and the live definition must match that service on image, ports, environment,
+    # volumes, labels and restart policy. The only tolerated differences are the
+    # legacy bridge network and the missing Compose labels. Anything else, including a
+    # same-named container recreated by hand, is plain ROGUE.
     awaiting: dict[str, LiveContainer] = {}
     for container in unlabelled:
-        guess = sanitise_service_name(container.name, baseline.project_name)
-        if guess in baseline.services and not by_service[guess] and guess not in awaiting:
-            awaiting[guess] = container
-        else:
+        adopted_as = context.adopted.get(container.id)
+        if adopted_as is None or adopted_as not in baseline.services:
             rogues.append((container, "no Compose project labels"))
+            continue
+        if by_service[adopted_as] or adopted_as in awaiting:
+            rogues.append((container, "no Compose project labels"))
+            continue
+        changed = [
+            d.field
+            for d in compare(baseline.services[adopted_as], container, baseline.project_name)
+            if d.changed
+        ]
+        if not changed or _only_legacy_network_drift(changed, container):
+            awaiting[adopted_as] = container
+        else:
+            rogues.append(
+                (
+                    container,
+                    f"adopted as '{adopted_as}' but its live definition differs on "
+                    f"{', '.join(changed)}",
+                )
+            )
 
     records: list[DriftRecord] = []
     for service_name, service in baseline.services.items():

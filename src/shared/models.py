@@ -76,6 +76,10 @@ class ParsedService:
         restart: Restart policy declared by the service, when present.
         networks: Network names declared by the service.
         container_name: Explicit container name declared by the service.
+        unresolved_env: Environment keys whose baseline value referenced a variable
+            that is not set where DriftWarden runs (for example the ``${KEY}``
+            placeholders adoption writes). Their value is supplied at deploy time, so
+            the diff engine does not compare them.
     """
 
     service_name: str
@@ -87,6 +91,7 @@ class ParsedService:
     restart: str | None = None
     networks: list[str] = field(default_factory=list)
     container_name: str | None = None
+    unresolved_env: set[str] = field(default_factory=set)
 
     @classmethod
     def extract(cls, name: str, node: dict[str, Any]) -> "ParsedService":

@@ -719,7 +719,8 @@ async def test_enforce_mode_recreates_awaiting_restart_containers(
     watcher = FakeWatcher(settings)
     watcher.containers = [rogue_container]
     watcher.on_recreate = container_from_service
-    reconciler, _ = build(settings, watcher)
+    reconciler, store = build(settings, watcher)
+    store.add_adopted_instance(rogue_container.id, "rogue-db", 7)  # its PR merged earlier
     await reconciler.start()
     try:
         record = reconciler.projector.snapshot.find("rogue-db")
@@ -731,5 +732,56 @@ async def test_enforce_mode_recreates_awaiting_restart_containers(
         assert [r[0] for r in watcher.recreated if r[0] == "rogue-db"] == ["rogue-db"]
         after = reconciler.projector.snapshot.find("infrastructure-test-rogue-db-1")
         assert after is not None and after.drift_status is DriftStatus.MATCHED
+        assert store.list_adopted_instances() == {}  # the adopted instance is gone
+        audit = [row.action for row in store.list_audit()]
+        assert AuditAction.ADOPTION_INVALIDATED in audit
+    finally:
+        await reconciler.stop()
+
+
+async def test_merged_adoption_binds_to_the_inspected_instance(
+    monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, rogue_container: LiveContainer
+) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container]
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        await reconciler.adopt("rogue-db")
+        github.content = github.mutated or ""
+        github.sha = "sha-merged"
+        github.pr_states[1] = "merged"
+        await reconciler.poll_pull_requests()
+        await asyncio.sleep(0.1)
+        assert store.list_adopted_instances() == {rogue_container.id: "rogue-db"}
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is DriftStatus.AWAITING_RESTART
+
+        # Operator deletes it and runs a new container with the same name and another port.
+        watcher.containers = [
+            make_container(
+                id="z" * 64,
+                name="rogue-db",
+                image="mariadb:latest",
+                ports=["3307:3306/tcp"],
+                networks=["bridge"],
+                environment={"MARIADB_ROOT_PASSWORD": "rogue", "PATH": "/usr/bin"},
+            )
+        ]
+        await reconciler.reconcile("event")
+        assert store.list_adopted_instances() == {}
+        rogue = next(r for r in reconciler.projector.snapshot.records if r.container_id == "z" * 64)
+        assert rogue.drift_status is DriftStatus.ROGUE
+        service = reconciler.projector.snapshot.find("rogue-db")
+        assert service is not None and service.drift_status in (
+            DriftStatus.MISSING,
+            DriftStatus.ROGUE,
+        )
     finally:
         await reconciler.stop()

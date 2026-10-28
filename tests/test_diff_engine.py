@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from shared.constants import DriftStatus
-from shared.models import PendingAdoption
+from shared.models import DriftRecord, PendingAdoption
 from tests.conftest import PROJECT, compose_labels, make_container
 from warden.core.baseline_parser import Baseline
 from warden.core.docker_watcher import LiveContainer, MountInfo
@@ -330,24 +330,62 @@ def test_display_name_falls_back_to_baseline_identity(baseline: Baseline) -> Non
     assert by_ref["web"].container_name is None
 
 
-def test_adopted_rogue_becomes_awaiting_restart_after_merge(
+def test_awaiting_restart_is_strictly_post_adoption(
     baseline: Baseline, rogue_container: LiveContainer
 ) -> None:
     from shared.models import ParsedService
 
-    # The merged baseline now declares a service named after the rogue container.
+    # The merged baseline now declares a service named after the adopted container.
     baseline.services["rogue-db"] = ParsedService(
-        service_name="rogue-db", image="mariadb:latest", ports=["3306:3306/tcp"]
+        service_name="rogue-db",
+        image="mariadb:latest",
+        ports=["3306:3306/tcp"],
+        environment={"MARIADB_ROOT_PASSWORD": "rogue"},
     )
+    adopted = {rogue_container.id: "rogue-db"}
+
+    def service_row(records: list[DriftRecord]) -> DriftRecord:
+        return next(r for r in records if r.service_name == "rogue-db")
+
+    # Same name, declared service, but no adoption record: an unmanaged workload.
     result = evaluate([rogue_container], context(baseline))
-    by_ref = {r.ref: r for r in result.records}
-    assert "rogue-db" in by_ref and by_ref["rogue-db"].drift_status is DriftStatus.AWAITING_RESTART
-    record = by_ref["rogue-db"]
-    assert record.service_name == "rogue-db" and record.container_id == rogue_container.id
-    assert record.actions == ["revert"]
+    assert service_row(result.records).drift_status is DriftStatus.MISSING
+    assert any(r.drift_status is DriftStatus.ROGUE for r in result.records)
+
+    # The adopted instance with strict parity (only the bridge network differs).
+    result = evaluate([rogue_container], context(baseline, adopted=adopted))
+    record = service_row(result.records)
+    assert record.drift_status is DriftStatus.AWAITING_RESTART
+    assert record.container_id == rogue_container.id and record.actions == ["revert"]
     assert "Will join project network upon next restart" in record.message
-    assert statuses(result.records).get("rogue-db") == "awaiting_restart"
-    assert "missing" not in statuses(result.records).values() or statuses(result.records)["web"]
+
+    # Recreated by hand with a different host port: SHADOW IT, even with the old id.
+    altered = make_container(
+        id=rogue_container.id,
+        name="rogue-db",
+        image="mariadb:latest",
+        ports=["3307:3306/tcp"],
+        networks=["bridge"],
+        environment={"MARIADB_ROOT_PASSWORD": "rogue", "PATH": "/usr/bin"},
+    )
+    result = evaluate([altered], context(baseline, adopted=adopted))
+    assert service_row(result.records).drift_status is DriftStatus.MISSING
+    rogue = next(r for r in result.records if r.container_id == altered.id)
+    assert rogue.drift_status is DriftStatus.ROGUE
+    assert "differs on ports" in rogue.message
+
+    # A new container instance with the same name never inherits the adoption.
+    newcomer = make_container(
+        id="n" * 64,
+        name="rogue-db",
+        image="mariadb:latest",
+        ports=["3306:3306/tcp"],
+        networks=["bridge"],
+        environment={"MARIADB_ROOT_PASSWORD": "rogue"},
+    )
+    result = evaluate([newcomer], context(baseline, adopted=adopted))
+    rogue = next(r for r in result.records if r.container_id == newcomer.id)
+    assert rogue.drift_status is DriftStatus.ROGUE
 
     # Once Compose recreated it with labels, the unlabelled leftover is plain rogue again.
     labelled = make_container(
@@ -356,17 +394,19 @@ def test_adopted_rogue_becomes_awaiting_restart_after_merge(
         image="mariadb:latest",
         labels=compose_labels("rogue-db"),
         ports=["3306:3306/tcp"],
+        environment={"MARIADB_ROOT_PASSWORD": "rogue"},
     )
-    result = evaluate([rogue_container, labelled], context(baseline))
+    result = evaluate([rogue_container, labelled], context(baseline, adopted=adopted))
     by_ref = {r.ref: r for r in result.records}
     assert by_ref[f"{PROJECT}-rogue-db-1"].drift_status is DriftStatus.MATCHED
     assert by_ref["rogue-db"].drift_status is DriftStatus.ROGUE
 
-    # A stopped unlabelled container does not count as awaiting restart.
+    # A stopped adopted instance does not count as awaiting restart.
     rogue_container.state = "exited"
-    result = evaluate([rogue_container], context(baseline))
-    by_ref = {r.ref: r for r in result.records}
-    assert by_ref["rogue-db"].drift_status is DriftStatus.ROGUE
+    result = evaluate([rogue_container], context(baseline, adopted=adopted))
+    assert service_row(result.records).drift_status is DriftStatus.MISSING
+    leftover = next(r for r in result.records if r.container_id == rogue_container.id)
+    assert leftover.drift_status is DriftStatus.ROGUE
 
 
 def test_network_only_drift_after_adoption_is_awaiting_restart(
@@ -375,7 +415,14 @@ def test_network_only_drift_after_adoption_is_awaiting_restart(
     from warden.engine.diff_engine import AWAITING_RESTART_MESSAGE
 
     cache_container.networks = ["bridge"]  # adopted and merged, never recreated by Compose
+    adopted = {cache_container.id: "cache"}
+
+    # Without an adoption record the network difference is ordinary drift.
     result = evaluate([cache_container], context(baseline))
+    record = next(r for r in result.records if r.ref == cache_container.name)
+    assert record.drift_status is DriftStatus.DRIFTED
+
+    result = evaluate([cache_container], context(baseline, adopted=adopted))
     record = next(r for r in result.records if r.ref == cache_container.name)
     assert record.drift_status is DriftStatus.AWAITING_RESTART
     assert record.message == AWAITING_RESTART_MESSAGE
@@ -383,13 +430,31 @@ def test_network_only_drift_after_adoption_is_awaiting_restart(
 
     # Anything else that differs is real drift, even with the bridge network.
     cache_container.ports = ["6378:6378/tcp"]
-    result = evaluate([cache_container], context(baseline))
+    result = evaluate([cache_container], context(baseline, adopted=adopted))
     record = next(r for r in result.records if r.ref == cache_container.name)
     assert record.drift_status is DriftStatus.DRIFTED
 
     # A custom network that is not the legacy bridge is drift too.
     cache_container.ports = ["6379:6379/tcp"]
     cache_container.networks = ["some-other-net"]
-    result = evaluate([cache_container], context(baseline))
+    result = evaluate([cache_container], context(baseline, adopted=adopted))
     record = next(r for r in result.records if r.ref == cache_container.name)
     assert record.drift_status is DriftStatus.DRIFTED
+
+
+def test_unresolved_env_placeholders_are_not_drift(baseline: Baseline) -> None:
+    service = baseline.services["cache"]
+    service.environment = {"REDIS_PASSWORD": "", "REDIS_MODE": "cluster"}
+    service.unresolved_env = {"REDIS_PASSWORD"}
+    container = make_container(
+        name="c",
+        image="redis:alpine",
+        labels={"warden.managed": "true", "warden.repo": "my-cs-project"},
+        ports=["6379:6379/tcp"],
+        environment={"REDIS_PASSWORD": "anything-at-all", "REDIS_MODE": "cluster"},
+    )
+    env = next(d for d in compare(service, container, PROJECT) if d.field == "environment")
+    assert not env.changed and "REDIS_PASSWORD=${REDIS_PASSWORD}" in (env.expected or "")
+    container.environment["REDIS_MODE"] = "standalone"
+    env = next(d for d in compare(service, container, PROJECT) if d.field == "environment")
+    assert env.changed

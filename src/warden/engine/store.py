@@ -58,6 +58,20 @@ class StateStore(Protocol):
         """Delete an exemption by id."""
         ...
 
+    def add_adopted_instance(
+        self, container_id: str, service_name: str, pr_number: int | None
+    ) -> None:
+        """Remember an adopted container instance."""
+        ...
+
+    def list_adopted_instances(self) -> dict[str, str]:
+        """Active adopted instances: container id -> service name."""
+        ...
+
+    def invalidate_adopted_instance(self, container_id: str) -> None:
+        """Forget an adopted instance that no longer exists."""
+        ...
+
     def list_settings(self) -> dict[str, str]:
         """Operator setting overrides."""
         ...

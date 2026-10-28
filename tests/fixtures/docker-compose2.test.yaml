@@ -1,0 +1,18 @@
+version: '3.8'
+name: infrastructure-test2
+
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8585:85"
+    labels:
+      - "warden.managed=true"
+
+  api:
+    image: python:3.11-alpine
+    command: python -m http.server 5000
+    ports:
+      - "5000:5000"
+    labels:
+      - "warden.managed=true"

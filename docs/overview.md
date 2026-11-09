@@ -71,7 +71,7 @@ For every container on the host, in this order:
 
 ## 2. The workflow, end to end
 
-![DriftWarden end-to-end workflow: inputs, engine, state and logs, operator decisions and the two feedback loops](../images/workflow.svg)
+![DriftWarden end-to-end workflow: Git and the Docker host feed the engine, the dashboard shows the result, Enforce and Adopt close the loop](../images/workflow.svg)
 
 *Inputs (GitHub baseline, Docker socket) feed the reconciler; the diff engine compares the host
 snapshot with the declared configuration; state and logs go to the browser over SSE and to
@@ -163,7 +163,7 @@ not land. In `enforce` mode the red Enforce arrows fire by themselves after the 
 
 ![Two actions, two directions: Enforce makes the host match Git, Adopt makes Git match the host](../images/enforce-vs-adopt.svg)
 
-![Adopt lifecycle: drift detected, Adopt clicked, YAML synthesised, branch and pull request, the PENDING_ADOPTION buffer, and the four ways an entry leaves it](../images/adopt-lifecycle.svg)
+![Adopt lifecycle: drift detected, Adopt clicked, YAML synthesised, branch and pull request, the PENDING_ADOPTION buffer, and the three ways an entry leaves it](../images/adopt-lifecycle.svg)
 
 ---
 
@@ -310,14 +310,16 @@ Removes the three tool caches and every `__pycache__` directory.
 
 ### Diagrams (`images/`)
 
-Every diagram in this documentation, and the logo, is generated: `images/src/<name>.py` draws
-it with the small helper in `images/src/draw.py` (plain Python, no dependencies) using the
-dashboard's own colour tones, and `images/*.svg` is the committed result. `images/*.png` are
-rasterised copies for places that cannot show SVG. After changing a generator:
+Every diagram in this documentation is generated: `images/src/<name>.py` draws it with the
+small helper in `images/src/draw.py` (plain Python, no dependencies) and `images/*.svg` is the
+committed result. The house style is deliberately minimal: core components and primary flows
+only, very large bold type, a dark slate background and three glowing accents (cyan, mint green
+and warm orange). `images/*.png` are rasterised copies for places that cannot show SVG. After
+changing a generator:
 
 ```
 python images/src/build.py     # rewrites images/*.svg
-node images/src/render.js      # rewrites images/*.png (Playwright Chromium; any SVG rasteriser works)
+node images/src/render.js      # rewrites images/*.png (Playwright if installed, else headless Edge/Chrome)
 ```
 
 ### Tests (`tests/`)

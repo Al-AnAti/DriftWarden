@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.svg" alt="DriftWarden logo" width="160">
+  <img src="images/logo.png" alt="DriftWarden logo" width="160">
 </p>
 
 # DriftWarden

@@ -5,9 +5,11 @@ Run from the repository root::
     python images/src/build.py          # writes images/*.svg
     node images/src/render.js           # rasterises them to images/*.png (needs Playwright)
 
-The generators are plain Python with no third-party dependency; ``render.js`` uses the
-Playwright Chromium that ships with the Claude Code environment, but any SVG rasteriser
-(Inkscape, rsvg-convert, a browser screenshot) produces the same PNGs.
+The generators are plain Python with no third-party dependency; ``render.js`` uses Playwright
+when it is installed and otherwise falls back to a locally installed Edge or Chrome in
+headless mode, but any SVG rasteriser (Inkscape, rsvg-convert, a browser screenshot)
+produces the same PNGs. ``logo.py`` is kept for reference but not run: the committed
+``images/logo.png`` is the original artwork.
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GENERATORS = (
-    "logo",
     "timeline",
     "workflow",
     "state_machine",

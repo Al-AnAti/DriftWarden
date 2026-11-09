@@ -26,7 +26,7 @@ GENERATORS = (
     "state_machine",
     "adopt_lifecycle",
     "evaluation_order",
-    "enforce_vs_adopt",
+    "two_verbs",
     "architecture",
 )
 

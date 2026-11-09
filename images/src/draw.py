@@ -45,11 +45,11 @@ ACCENT = {
 # One colour per drift state, matching the dashboard's status pills.
 STATUS_ACCENT = {
     "MATCHED": "mint",
-    "DRIFTED": "orange",
+    "DRIFTED": "amber",
     "MISSING": "cyan",
     "ROGUE": "rose",
     "PENDING_ADOPTION": "violet",
-    "AWAITING_RESTART": "amber",
+    "AWAITING_RESTART": "orange",
 }
 
 

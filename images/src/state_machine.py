@@ -1,8 +1,9 @@
 # ruff: noqa: E501
 """Drift state machine: the six states and the events or actions that move a container between them.
 
-Sized for a projector (1920x1080). Every arrow takes the colour of the state it arrives in;
-labels run along their arrows.
+Sized for a projector (1920x1080). Two rows: DRIFTED, MATCHED, ROGUE on top and MISSING,
+PENDING_ADOPTION, AWAITING_RESTART below. Every arrow takes the colour of the state it
+arrives in, and its label runs along the arrow.
 """
 
 import math
@@ -13,18 +14,20 @@ W, H = 1920, 1080
 c = Canvas(W, H, "DriftWarden drift states and the transitions between them")
 c.title("Drift states")
 
-NH = 100
+NH = 110
+TOP, BOTTOM = 330, 800
 pos = {
-    "MATCHED": (960, 200),
-    "DRIFTED": (420, 580),
-    "MISSING": (960, 580),
-    "ROGUE": (1500, 580),
-    "PENDING_ADOPTION": (960, 920),
-    "AWAITING_RESTART": (1500, 920),
+    "DRIFTED": (400, TOP),
+    "MATCHED": (960, TOP),
+    "ROGUE": (1520, TOP),
+    "MISSING": (400, BOTTOM),
+    "PENDING_ADOPTION": (960, BOTTOM),
+    "AWAITING_RESTART": (1520, BOTTOM),
 }
 width = {n: (380 if len(n) > 8 else 300) for n in pos}
 col = {n: color_of(STATUS_ACCENT[n]) for n in pos}
 MINT = col["MATCHED"]
+VIOLET = col["PENDING_ADOPTION"]
 
 
 def trim(a, b, perp=0):
@@ -46,7 +49,7 @@ def trim(a, b, perp=0):
 
 
 def edge(a, b, text, color, perp=0, dash=None, gap=36):
-    """Arrow a -> b with its label running along the line, pushed `gap` px to the side."""
+    """Arrow a -> b with its label running along the line, pushed `gap` px to the side of `perp`."""
     s, e, (nx, ny), (ux, uy) = trim(a, b, perp)
     c.arrow([s, e], stroke=color, sw=4, dash=dash)
     side = 1 if perp >= 0 else -1
@@ -59,25 +62,40 @@ def edge(a, b, text, color, perp=0, dash=None, gap=36):
     c.label(mx, my, text, color, angle=angle)
 
 
-# leaving MATCHED (host event) and coming back (Enforce)
-edge("MATCHED", "DRIFTED", "field changed", col["DRIFTED"], perp=-16)
-edge("DRIFTED", "MATCHED", "Enforce", MINT, perp=-16)
-edge("MATCHED", "MISSING", "stopped / removed", col["MISSING"], perp=-16)
-edge("MISSING", "MATCHED", "Enforce", MINT, perp=-16)
-
-# Adopt into the buffer, and back out when the pull request does not land
-for n in ("DRIFTED", "MISSING", "ROGUE"):
-    edge(n, "PENDING_ADOPTION", "Adopt", col["PENDING_ADOPTION"], perp=-16)
-    edge("PENDING_ADOPTION", n, "PR closed", col["PENDING_ADOPTION"], perp=-16, dash="10 10")
-
-# PR merged: straight back to MATCHED (left loop), or a restart first for an adopted ROGUE
-c.path("M760,920 L160,920 L160,200 L800,200", stroke=MINT, sw=4)
-c.label(160, 560, "PR merged", "mint", angle=-90)
+# top row: MATCHED <-> DRIFTED
+edge("MATCHED", "DRIFTED", "field changed", col["DRIFTED"], perp=16)
+edge("DRIFTED", "MATCHED", "Enforce", MINT, perp=16)
+# MATCHED <-> MISSING, diagonal
+edge("MATCHED", "MISSING", "stopped / removed", col["MISSING"], perp=16)
+edge("MISSING", "MATCHED", "Enforce", MINT, perp=16)
+# bottom row: MISSING <-> PENDING_ADOPTION
+edge("PENDING_ADOPTION", "MISSING", "PR closed", col["MISSING"], perp=16, dash="10 10")
+edge("MISSING", "PENDING_ADOPTION", "Adopt", VIOLET, perp=16)
+# ROGUE <-> PENDING_ADOPTION, diagonal
+edge("PENDING_ADOPTION", "ROGUE", "PR closed", col["ROGUE"], perp=-16, dash="10 10")
+edge("ROGUE", "PENDING_ADOPTION", "Adopt", VIOLET, perp=-16)
+# PENDING_ADOPTION -> MATCHED and -> AWAITING_RESTART
+edge("PENDING_ADOPTION", "MATCHED", "PR merged", MINT, gap=-36)
 edge(
-    "PENDING_ADOPTION", "AWAITING_RESTART", "PR merged for a ROGUE", col["AWAITING_RESTART"], gap=88
+    "PENDING_ADOPTION", "AWAITING_RESTART", "PR merged for a ROGUE", col["AWAITING_RESTART"], gap=82
 )
-c.path("M1700,920 L1760,920 L1760,200 L1120,200", stroke=MINT, sw=4)
-c.label(1760, 560, "restarted with Compose labels", "mint", angle=-90)
+
+# DRIFTED <-> PENDING_ADOPTION, looped around the left: Adopt outside, PR closed inside
+c.path(
+    f"M240,{TOP + 16} L70,{TOP + 16} L70,1020 L1000,1020 L1000,{BOTTOM + 65}", stroke=VIOLET, sw=4
+)
+c.label(70, 640, "Adopt", "violet", angle=-90)
+c.path(
+    f"M920,{BOTTOM + 65} L920,970 L130,970 L130,{TOP - 16} L240,{TOP - 16}",
+    stroke=col["DRIFTED"],
+    sw=4,
+    dash="10 10",
+)
+c.label(130, 560, "PR closed", "amber", angle=-90)
+
+# AWAITING_RESTART -> MATCHED, looped over the top
+c.path(f"M1720,{BOTTOM} L1850,{BOTTOM} L1850,170 L960,170 L960,{TOP - 65}", stroke=MINT, sw=4)
+c.label(1850, 540, "restarted with Compose labels", "mint", angle=-90)
 
 for n, (x, y) in pos.items():
     c.node(x, y, width[n], NH, n, STATUS_ACCENT[n], size=30, mono=True)

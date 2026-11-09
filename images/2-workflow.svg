@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="t">
+  <title id="t">DriftWarden end-to-end workflow: Git and the Docker host feed the engine, the dashboard shows the result, Enforce and Adopt close the loop</title>
+  <defs>
+    <marker id="mfb7185" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#fb7185" />
+    </marker>
+    <filter id="gfb71856" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#fb7185" flood-opacity="0.6" />
+    </filter>
+    <filter id="gfb71858" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#fb7185" flood-opacity="0.6" />
+    </filter>
+    <marker id="ma78bfa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+    <filter id="ga78bfa6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#a78bfa" flood-opacity="0.6" />
+    </filter>
+    <filter id="g22d3ee12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#22d3ee" flood-opacity="0.75" />
+    </filter>
+    <filter id="g22d3ee6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#22d3ee" flood-opacity="0.6" />
+    </filter>
+    <filter id="g22d3ee8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#22d3ee" flood-opacity="0.75" />
+    </filter>
+    <filter id="g34d39912" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#34d399" flood-opacity="0.75" />
+    </filter>
+    <filter id="g34d3996" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#34d399" flood-opacity="0.6" />
+    </filter>
+    <filter id="g34d3998" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#34d399" flood-opacity="0.6" />
+    </filter>
+    <filter id="gfb923c12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#fb923c" flood-opacity="0.75" />
+    </filter>
+    <filter id="gfb923c6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#fb923c" flood-opacity="0.6" />
+    </filter>
+    <filter id="gfb923c8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#fb923c" flood-opacity="0.6" />
+    </filter>
+    <marker id="m22d3ee" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#22d3ee" />
+    </marker>
+    <marker id="m34d399" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#34d399" />
+    </marker>
+    <marker id="mfb923c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#fb923c" />
+    </marker>
+      <path d="M0,0 L10,5 L0,10 z" fill="#34d399" />
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#0f172a" />
+  <rect x="100" y="70" width="12" height="48" rx="6" fill="#22d3ee" stroke="none" stroke-width="3" filter="url(#g22d3ee8)" />
+  <text x="135" y="112" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="52" fill="#f8fafc" font-weight="800" text-anchor="start">End-to-end workflow</text>
+  <!-- Git Node -->
+  <rect x="150" y="320" width="320" height="130" rx="24" fill="rgba(34,211,238,0.1)" stroke="#22d3ee" stroke-width="3" filter="url(#g22d3ee12)" />
+  <text x="310" y="380" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="34" fill="#22d3ee" font-weight="800" text-anchor="middle">Git</text>
+  <text x="310" y="420" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">docker-compose.yaml is the truth</text>
+  <!-- Docker Host Node -->
+  <rect x="150" y="590" width="320" height="130" rx="24" fill="rgba(251,146,60,0.1)" stroke="#fb923c" stroke-width="3" filter="url(#gfb923c12)" />
+  <text x="310" y="650" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="34" fill="#fb923c" font-weight="800" text-anchor="middle">Docker host</text>
+  <text x="310" y="690" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">every container, running or not</text>
+  <!-- Engine Node -->
+  <rect x="670" y="390" width="500" height="260" rx="24" fill="rgba(34,211,238,0.1)" stroke="#22d3ee" stroke-width="3" filter="url(#g22d3ee12)" />
+  <text x="920" y="475" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="44" fill="#22d3ee" font-weight="800" text-anchor="middle">Engine</text>
+  <text x="920" y="515" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">watch · diff · classify</text>
+  <text x="920" y="565" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#94a3b8" font-weight="700" text-anchor="middle" opacity="0.9"><tspan fill="#34d399">MATCHED</tspan> · <tspan fill="#fbbf24">DRIFTED</tspan> · <tspan fill="#22d3ee">MISSING</tspan> · <tspan fill="#fb7185">ROGUE</tspan></text>
+  <!-- Dashboard Node -->
+  <rect x="1350" y="390" width="420" height="260" rx="24" fill="rgba(52,211,153,0.1)" stroke="#34d399" stroke-width="3" filter="url(#g34d39912)" />
+  <text x="1560" y="465" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="44" fill="#34d399" font-weight="800" text-anchor="middle">Dashboard</text>
+  <text x="1560" y="505" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">the operator decides</text>
+  <!-- Enforce Button (Red) -->
+  <rect x="1395" y="555" width="150" height="50" rx="25" fill="rgba(251,113,133,0.14)" stroke="#fb7185" stroke-width="3" filter="url(#gfb71858)" />
+  <text x="1470" y="588" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb7185" font-weight="800" text-anchor="middle" letter-spacing="0.5">Enforce</text>
+  <!-- Adopt Button (Green) -->
+  <rect x="1565" y="555" width="130" height="50" rx="25" fill="rgba(52,211,153,0.14)" stroke="#34d399" stroke-width="3" filter="url(#g34d3998)" />
+  <text x="1630" y="588" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle" letter-spacing="0.5">Adopt</text>
+  <!-- Git to Engine Arrow & Rotated Baseline Label -->
+  <path d="M470,385 L666,470" fill="none" stroke="#22d3ee" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)" />
+  <text x="568" y="415" transform="rotate(23.5, 568, 415)" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle">baseline</text>
+  <!-- Docker Host to Engine Arrow & Rotated Events Label -->
+  <path d="M470,655 L666,570" fill="none" stroke="#fb923c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfb923c)" filter="url(#gfb923c6)" />
+  <text x="568" y="640" transform="rotate(-23.5, 568, 640)" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb923c" font-weight="800" text-anchor="middle">events</text>
+  <!-- Engine to Dashboard Arrow & Snapshot Label -->
+  <path d="M1170,520 L1346,520" fill="none" stroke="#34d399" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)" />
+  <text x="1258" y="495" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">snapshot</text>
+  <!-- Top Loop (Adopt) -->
+  <path d="M1560,390 L1560,220 L310,220 L310,316" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)" />
+  <text x="935" y="195" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">Adopt: a pull request makes Git match the host</text>
+  <!-- Bottom Loop (Enforce - Red) -->
+  <path d="M1560,650 L1560,860 L310,860 L310,724" fill="none" stroke="#fb7185" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfb7185)" filter="url(#gfb71858)" />
+  <text x="935" y="895" font-family="Inter, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb7185" font-weight="800" text-anchor="middle">Enforce: the host is recreated to match Git</text>
+</svg>

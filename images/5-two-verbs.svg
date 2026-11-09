@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="t">
+  <title id="t">DriftWarden two verbs, two modes: what Enforce and Adopt do for each drift state, and observe versus enforce mode</title>
+  <defs>
+    <filter id="g22d3ee8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#22d3ee" flood-opacity="0.6"/>
+    </filter>
+    <filter id="g34d39912" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#34d399" flood-opacity="0.75"/>
+    </filter>
+    <filter id="g94a3b812" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#94a3b8" flood-opacity="0.75"/>
+    </filter>
+    <filter id="ga78bfa8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#a78bfa" flood-opacity="0.6"/>
+    </filter>
+    <filter id="gfb718512" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#fb7185" flood-opacity="0.75"/>
+    </filter>
+    <filter id="gfb71858" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#fb7185" flood-opacity="0.6"/>
+    </filter>
+    <filter id="gfb923c8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#fb923c" flood-opacity="0.6"/>
+    </filter>
+    <filter id="gfbbf248" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#fbbf24" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  <rect width="100%" height="100%" fill="#0f172a"/>
+  <rect x="60" y="43.68" width="10" height="39.6" rx="5" fill="#22d3ee" stroke="none" stroke-width="3" filter="url(#g22d3ee8)"/>
+  <text x="90" y="78" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="44" fill="#f8fafc" font-weight="800" text-anchor="start">Two verbs, two modes</text>
+  <rect x="140.0" y="190.0" width="760" height="120" rx="22" fill="rgba(251,113,133,0.1)" stroke="#fb7185" stroke-width="3" filter="url(#gfb718512)"/>
+  <text x="520" y="252.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="40" fill="#fb7185" font-weight="800" text-anchor="middle">Enforce</text>
+  <text x="520" y="284.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">make the host match Git</text>
+  <rect x="150.0" y="389.0" width="126.28" height="42" rx="21.0" fill="rgba(251,191,36,0.14)" stroke="#fbbf24" stroke-width="2.5" filter="url(#gfbbf248)"/>
+  <text x="213.14" y="417.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#fbbf24" font-weight="800" text-anchor="middle" letter-spacing="0.5">DRIFTED</text>
+  <text x="420.0" y="418" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">recreate the container exactly as declared</text>
+  <rect x="150.0" y="469.0" width="126.28" height="42" rx="21.0" fill="rgba(34,211,238,0.14)" stroke="#22d3ee" stroke-width="2.5" filter="url(#g22d3ee8)"/>
+  <text x="213.14" y="497.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle" letter-spacing="0.5">MISSING</text>
+  <text x="420.0" y="498" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">create the declared service</text>
+  <rect x="150.0" y="549.0" width="99.0" height="42" rx="21.0" fill="rgba(251,113,133,0.14)" stroke="#fb7185" stroke-width="2.5" filter="url(#gfb71858)"/>
+  <text x="199.5" y="577.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#fb7185" font-weight="800" text-anchor="middle" letter-spacing="0.5">ROGUE</text>
+  <text x="420.0" y="578" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">stop it, then remove it</text>
+  <rect x="149.99999999999997" y="629.0" width="249.04000000000002" height="42" rx="21.0" fill="rgba(251,146,60,0.14)" stroke="#fb923c" stroke-width="2.5" filter="url(#gfb923c8)"/>
+  <text x="274.52" y="657.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#fb923c" font-weight="800" text-anchor="middle" letter-spacing="0.5">AWAITING_RESTART</text>
+  <text x="420.0" y="658" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">recreate it with its Compose labels</text>
+  <text x="150.0" y="740" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#94a3b8" font-weight="600" text-anchor="start">Docker SDK only, never docker compose</text>
+  <rect x="1020.0" y="190.0" width="760" height="120" rx="22" fill="rgba(52,211,153,0.1)" stroke="#34d399" stroke-width="3" filter="url(#g34d39912)"/>
+  <text x="1400" y="252.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="40" fill="#34d399" font-weight="800" text-anchor="middle">Adopt</text>
+  <text x="1400" y="284.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">make Git match the host</text>
+  <rect x="1030.0" y="389.0" width="99.0" height="42" rx="21.0" fill="rgba(251,113,133,0.14)" stroke="#fb7185" stroke-width="2.5" filter="url(#gfb71858)"/>
+  <text x="1079.5" y="417.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#fb7185" font-weight="800" text-anchor="middle" letter-spacing="0.5">ROGUE</text>
+  <text x="1300.0" y="418" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">add a service block to the compose file</text>
+  <rect x="1030.0" y="469.0" width="126.28" height="42" rx="21.0" fill="rgba(251,191,36,0.14)" stroke="#fbbf24" stroke-width="2.5" filter="url(#gfbbf248)"/>
+  <text x="1093.14" y="497.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#fbbf24" font-weight="800" text-anchor="middle" letter-spacing="0.5">DRIFTED</text>
+  <text x="1300.0" y="498" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">sync only the fields that changed</text>
+  <rect x="1030.0" y="549.0" width="126.28" height="42" rx="21.0" fill="rgba(34,211,238,0.14)" stroke="#22d3ee" stroke-width="2.5" filter="url(#g22d3ee8)"/>
+  <text x="1093.14" y="577.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle" letter-spacing="0.5">MISSING</text>
+  <text x="1300.0" y="578" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">remove the service block</text>
+  <rect x="1030.0" y="629.0" width="249.04000000000002" height="42" rx="21.0" fill="rgba(167,139,250,0.14)" stroke="#a78bfa" stroke-width="2.5" filter="url(#ga78bfa8)"/>
+  <text x="1154.52" y="657.92" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle" letter-spacing="0.5">PENDING_ADOPTION</text>
+  <text x="1300.0" y="658" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" fill="#f8fafc" font-weight="600" text-anchor="start">parked here until the pull request lands</text>
+  <text x="1030.0" y="740" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#94a3b8" font-weight="600" text-anchor="start">one reviewed pull request per Adopt</text>
+  <rect x="140.0" y="800.0" width="760" height="130" rx="22" fill="rgba(148,163,184,0.1)" stroke="#94a3b8" stroke-width="3" filter="url(#g94a3b812)"/>
+  <text x="520" y="866.6" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="32" fill="#94a3b8" font-weight="800" text-anchor="middle">observe mode  (default)</text>
+  <text x="520" y="898.6" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">nothing happens on the host without a click</text>
+  <rect x="1020.0" y="800.0" width="760" height="130" rx="22" fill="rgba(251,113,133,0.1)" stroke="#fb7185" stroke-width="3" filter="url(#gfb718512)"/>
+  <text x="1400" y="866.6" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="32" fill="#fb7185" font-weight="800" text-anchor="middle">enforce mode</text>
+  <text x="1400" y="898.6" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#f8fafc" font-weight="600" text-anchor="middle" opacity="0.9">Enforce runs by itself after the grace window</text>
+  <text x="960" y="990" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" fill="#94a3b8" font-weight="600" text-anchor="middle">the buffer, the whitelist and excluded containers are never touched in either mode</text>
+</svg>

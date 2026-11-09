@@ -38,7 +38,7 @@ Everything is visible on a dashboard that updates live, every action is audited,
 destructive happens on its own unless the operator deliberately switches the mode to
 `enforce` and types a confirmation phrase.
 
-![DriftWarden in four steps: a manual change on the host, the event captured, the operator decides, the host is back in sync](../images/timeline.svg)
+![DriftWarden in four steps: a manual change on the host, the event captured, the operator decides, the host is back in sync](../images/0-timeline.svg)
 
 ### Vocabulary
 
@@ -65,13 +65,13 @@ For every container on the host, in this order:
 4. **Everything else is `ROGUE`** — including a container with perfect Compose labels for a
    service that Git does not declare. Labels state intent; Git decides legitimacy.
 
-![Zero-trust evaluation order: hard exclusions, whitelist, managed namespace, service mapping, field-by-field diff, and the PENDING_ADOPTION overlay](../images/evaluation-order.svg)
+![Zero-trust evaluation order: hard exclusions, whitelist, managed namespace, service mapping, field-by-field diff, and the PENDING_ADOPTION overlay](../images/3-evaluation-order.svg)
 
 ---
 
 ## 2. The workflow, end to end
 
-![DriftWarden end-to-end workflow: Git and the Docker host feed the engine, the dashboard shows the result, Enforce and Adopt close the loop](../images/workflow.svg)
+![DriftWarden end-to-end workflow: Git and the Docker host feed the engine, the dashboard shows the result, Enforce and Adopt close the loop](../images/2-workflow.svg)
 
 *Inputs (GitHub baseline, Docker socket) feed the reconciler; the diff engine compares the host
 snapshot with the declared configuration; state and logs go to the browser over SSE and to
@@ -156,20 +156,18 @@ Step by step:
 
 ### The same rules in pictures
 
-![Drift state machine: every state and the operator action or host event that moves a container between them](../images/state-machine.svg)
+![Drift state machine: every state and the operator action or host event that moves a container between them](../images/4-state-diagram.svg)
 
 *Solid arrows are operator actions or host events; dashed arrows are pull requests that did
-not land. In `enforce` mode the red Enforce arrows fire by themselves after the grace window.*
+not land. In `enforce` mode the Enforce arrows fire by themselves after the grace window.*
 
-![Two actions, two directions: Enforce makes the host match Git, Adopt makes Git match the host](../images/enforce-vs-adopt.svg)
-
-![Adopt lifecycle: drift detected, Adopt clicked, YAML synthesised, branch and pull request, the PENDING_ADOPTION buffer, and the two ways an entry leaves it](../images/adopt-lifecycle.svg)
+![Two verbs, two modes: what Enforce and Adopt do for each drift state, and observe versus enforce mode](../images/5-two-verbs.svg)
 
 ---
 
 ## 3. Architecture in one process
 
-![DriftWarden architecture: one FastAPI process with the engine in the lifespan, the web control plane, SQLite, GitHub, the Docker socket and the browser](../images/architecture.svg)
+![DriftWarden architecture: one FastAPI process with the engine in the lifespan, the web control plane, SQLite, GitHub, the Docker socket and the browser](../images/1-architecture.svg)
 
 | Package | Role | Imports |
 | --- | --- | --- |
@@ -310,16 +308,19 @@ Removes the three tool caches and every `__pycache__` directory.
 
 ### Diagrams (`images/`)
 
-Every diagram in this documentation is generated: `images/src/<name>.py` draws it with the
-small helper in `images/src/draw.py` (plain Python, no dependencies) and `images/*.svg` is the
-committed result. The house style is deliberately minimal: core components and primary flows
-only, very large bold type, a dark slate background and three glowing accents (cyan, mint green
-and warm orange). `images/*.png` are rasterised copies for places that cannot show SVG. After
-changing a generator:
+The six SVGs in `images/` are the presentation slides, numbered in speaking order
+(`0-timeline` to `5-two-verbs`), and the same files are embedded in this documentation. They
+are 1920x1080, hand-finished, and share one palette: mint for MATCHED and Adopt, amber for
+DRIFTED, cyan for MISSING, rose for ROGUE and Enforce, violet for PENDING_ADOPTION, orange for
+AWAITING_RESTART, on a dark slate background with large bold type and glowing accents.
+
+`images/src/<name>.py` draws the starting point of each slide with the small helper in
+`images/src/draw.py` (plain Python, no dependencies); the committed SVGs have been edited by
+hand since, so do not run the generators over them. They remain useful for drawing a new
+diagram in the same style, and `images/src/render.js` turns any SVG into a 2x PNG:
 
 ```
-python images/src/build.py     # rewrites images/*.svg
-node images/src/render.js      # rewrites images/*.png (Playwright if installed, else headless Edge/Chrome)
+node images/src/render.js 4-state-diagram.svg   # writes images/4-state-diagram.png
 ```
 
 ### Tests (`tests/`)

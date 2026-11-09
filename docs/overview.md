@@ -163,7 +163,7 @@ not land. In `enforce` mode the red Enforce arrows fire by themselves after the 
 
 ![Two actions, two directions: Enforce makes the host match Git, Adopt makes Git match the host](../images/enforce-vs-adopt.svg)
 
-![Adopt lifecycle: drift detected, Adopt clicked, YAML synthesised, branch and pull request, the PENDING_ADOPTION buffer, and the three ways an entry leaves it](../images/adopt-lifecycle.svg)
+![Adopt lifecycle: drift detected, Adopt clicked, YAML synthesised, branch and pull request, the PENDING_ADOPTION buffer, and the two ways an entry leaves it](../images/adopt-lifecycle.svg)
 
 ---
 

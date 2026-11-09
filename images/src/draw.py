@@ -12,6 +12,7 @@ House style for every diagram:
 from __future__ import annotations
 
 import html
+import re
 
 FONT = "Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 MONO = "'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace"
@@ -272,15 +273,62 @@ class Canvas:
     def svg(self) -> str:
         bg = f'<rect width="100%" height="100%" fill="{self.bg}"/>' if self.bg else ""
         defs = "<defs>" + "".join(self.defs[k] for k in sorted(self.defs)) + "</defs>"
-        return (
+        flat = (
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.w}" height="{self.h}" '
-            f'viewBox="0 0 {self.w} {self.h}" role="img" aria-labelledby="t">\n'
-            f'<title id="t">{esc(self.title_text)}</title>\n{defs}\n{bg}\n'
-            + "\n".join(self.parts)
-            + "\n</svg>\n"
+            f'viewBox="0 0 {self.w} {self.h}" role="img" aria-labelledby="t">'
+            f'<title id="t">{esc(self.title_text)}</title>{defs}{bg}'
+            + "".join(self.parts)
+            + "</svg>"
         )
+        return indent_svg(flat)
 
     def save(self, name: str) -> None:
         with open(f"{name}.svg", "w", encoding="utf-8") as f:
             f.write(self.svg())
         print("wrote", name)
+
+
+INLINE = {"text", "title", "tspan", "desc"}
+
+
+def indent_svg(src: str, step: str = "  ") -> str:
+    """Re-indent SVG markup, one element per line, keeping text-bearing elements on one line.
+
+    Whitespace only: the rendered result is identical to the input.
+    """
+    tokens = re.findall(r"<[^>]+>|[^<]+", src)
+    out: list[str] = []
+    depth = 0
+    inline = 0  # nesting depth inside a text-bearing element
+    for tok in tokens:
+        if not tok.startswith("<"):
+            if inline:
+                out[-1] += tok
+            elif tok.strip():
+                out.append(step * depth + tok.strip())
+            continue
+        name = re.match(r"</?([\w:-]+)", tok)
+        name = name.group(1) if name else ""
+        if tok.startswith("</"):
+            if inline:
+                out[-1] += tok
+                inline -= 1
+            else:
+                depth = max(depth - 1, 0)
+                out.append(step * depth + tok)
+        elif tok.endswith("/>") or tok.startswith("<?") or tok.startswith("<!"):
+            if inline:
+                out[-1] += tok
+            else:
+                out.append(step * depth + tok)
+        else:
+            if inline or name in INLINE:
+                if inline:
+                    out[-1] += tok
+                else:
+                    out.append(step * depth + tok)
+                inline += 1
+            else:
+                out.append(step * depth + tok)
+                depth += 1
+    return "\n".join(out) + "\n"

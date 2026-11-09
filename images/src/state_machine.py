@@ -1,8 +1,8 @@
 # ruff: noqa: E501
 """Drift state machine: the six states and the events or actions that move a container between them.
 
-Sized for a projector (1920x1080). Two rows: DRIFTED, MATCHED, ROGUE on top and MISSING,
-PENDING_ADOPTION, AWAITING_RESTART below. Every arrow takes the colour of the state it
+Sized for a projector (1920x1080). Two rows: DRIFTED, MATCHED, AWAITING_RESTART on top and
+ROGUE, PENDING_ADOPTION, MISSING below. Every arrow takes the colour of the state it
 arrives in, and its label runs along the arrow.
 """
 
@@ -15,14 +15,14 @@ c = Canvas(W, H, "DriftWarden drift states and the transitions between them")
 c.title("Drift states")
 
 NH = 110
-TOP, BOTTOM = 330, 800
+TOP, BOTTOM = 300, 780
 pos = {
     "DRIFTED": (400, TOP),
     "MATCHED": (960, TOP),
-    "ROGUE": (1520, TOP),
-    "MISSING": (400, BOTTOM),
+    "AWAITING_RESTART": (1520, TOP),
+    "ROGUE": (400, BOTTOM),
     "PENDING_ADOPTION": (960, BOTTOM),
-    "AWAITING_RESTART": (1520, BOTTOM),
+    "MISSING": (1520, BOTTOM),
 }
 width = {n: (380 if len(n) > 8 else 300) for n in pos}
 col = {n: color_of(STATUS_ACCENT[n]) for n in pos}
@@ -62,40 +62,28 @@ def edge(a, b, text, color, perp=0, dash=None, gap=36):
     c.label(mx, my, text, color, angle=angle)
 
 
-# top row: MATCHED <-> DRIFTED
+# top row
 edge("MATCHED", "DRIFTED", "field changed", col["DRIFTED"], perp=16)
 edge("DRIFTED", "MATCHED", "Enforce", MINT, perp=16)
-# MATCHED <-> MISSING, diagonal
-edge("MATCHED", "MISSING", "stopped / removed", col["MISSING"], perp=16)
-edge("MISSING", "MATCHED", "Enforce", MINT, perp=16)
-# bottom row: MISSING <-> PENDING_ADOPTION
-edge("PENDING_ADOPTION", "MISSING", "PR closed", col["MISSING"], perp=16, dash="10 10")
-edge("MISSING", "PENDING_ADOPTION", "Adopt", VIOLET, perp=16)
-# ROGUE <-> PENDING_ADOPTION, diagonal
-edge("PENDING_ADOPTION", "ROGUE", "PR closed", col["ROGUE"], perp=-16, dash="10 10")
-edge("ROGUE", "PENDING_ADOPTION", "Adopt", VIOLET, perp=-16)
-# PENDING_ADOPTION -> MATCHED and -> AWAITING_RESTART
+edge("AWAITING_RESTART", "MATCHED", "restarted with labels", MINT, gap=82)
+# bottom row
+edge("PENDING_ADOPTION", "ROGUE", "PR closed", col["ROGUE"], perp=16, dash="10 10")
+edge("ROGUE", "PENDING_ADOPTION", "Adopt", VIOLET, perp=16)
+edge("PENDING_ADOPTION", "MISSING", "PR closed", col["MISSING"], perp=-16, dash="10 10")
+edge("MISSING", "PENDING_ADOPTION", "Adopt", VIOLET, perp=-16)
+# diagonals
+edge("DRIFTED", "PENDING_ADOPTION", "Adopt", VIOLET, perp=-16)
+edge("PENDING_ADOPTION", "DRIFTED", "PR closed", col["DRIFTED"], perp=-16, dash="10 10")
+edge("MATCHED", "MISSING", "stopped / removed", col["MISSING"], perp=-16)
+edge("MISSING", "MATCHED", "Enforce", MINT, perp=-16)
+# PENDING_ADOPTION -> MATCHED straight up; -> AWAITING_RESTART around the outside
 edge("PENDING_ADOPTION", "MATCHED", "PR merged", MINT, gap=-36)
-edge(
-    "PENDING_ADOPTION", "AWAITING_RESTART", "PR merged for a ROGUE", col["AWAITING_RESTART"], gap=82
-)
-
-# DRIFTED <-> PENDING_ADOPTION, looped around the left: Adopt outside, PR closed inside
 c.path(
-    f"M240,{TOP + 16} L70,{TOP + 16} L70,1020 L1000,1020 L1000,{BOTTOM + 65}", stroke=VIOLET, sw=4
-)
-c.label(70, 640, "Adopt", "violet", angle=-90)
-c.path(
-    f"M920,{BOTTOM + 65} L920,970 L130,970 L130,{TOP - 16} L240,{TOP - 16}",
-    stroke=col["DRIFTED"],
+    f"M960,{BOTTOM + 65} L960,990 L1850,990 L1850,{TOP} L1720,{TOP}",
+    stroke=col["AWAITING_RESTART"],
     sw=4,
-    dash="10 10",
 )
-c.label(130, 560, "PR closed", "amber", angle=-90)
-
-# AWAITING_RESTART -> MATCHED, looped over the top
-c.path(f"M1720,{BOTTOM} L1850,{BOTTOM} L1850,170 L960,170 L960,{TOP - 65}", stroke=MINT, sw=4)
-c.label(1850, 540, "restarted with Compose labels", "mint", angle=-90)
+c.label(1400, 990, "PR merged for a ROGUE", "orange")
 
 for n, (x, y) in pos.items():
     c.node(x, y, width[n], NH, n, STATUS_ACCENT[n], size=30, mono=True)

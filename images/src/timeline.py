@@ -1,9 +1,9 @@
 # ruff: noqa: E501
-"""Four steps from a manual change on the host to a host back in sync."""
+"""Four steps from a manual change on the host to a host back in sync (1920x1080)."""
 
-from draw import LINE, MUTED, Canvas, color_of
+from draw import LINE, TEXT, Canvas, color_of, est_width
 
-W, H = 1600, 580
+W, H = 1920, 1080
 c = Canvas(
     W,
     H,
@@ -11,34 +11,51 @@ c = Canvas(
 )
 c.title("From a manual change to a host back in sync")
 
-xs = [260, 620, 980, 1340]
-accents = ["orange", "cyan", "cyan", "mint"]
+xs = [300, 740, 1180, 1620]
+accents = ["orange", "cyan", "violet", "mint"]
 titles = ["Manual change", "Event captured", "Operator decides", "Back in sync"]
-subs = [
-    ("docker run, a hot edit,", "a removed service"),
-    ("Docker socket event,", "classified in seconds"),
-    ("Enforce, Adopt or Whitelist:", "nothing without a click"),
-    ("every row MATCHED,", "the pill says IN SYNC"),
+details = [
+    (
+        "docker run with no labels,",
+        "an image or port edited by hand,",
+        "a service removed from the host",
+    ),
+    (
+        "the Docker socket emits the event,",
+        "a 2 s quiet window, then every",
+        "container is classified against Git",
+    ),
+    (
+        "the dashboard repaints live over SSE;",
+        "Enforce fixes the host, Adopt opens",
+        "a pull request, Whitelist exempts it",
+    ),
+    (
+        "the PR merges and the baseline is",
+        "re-fetched, or Enforce lands: every",
+        "row MATCHED, one audit row per action",
+    ),
 ]
-LY = 230
+LY = 420
 c.path(f"M{xs[0]},{LY} L{xs[-1]},{LY}", stroke=LINE, sw=6, head=False, glow=False)
 for i, x in enumerate(xs):
     col = color_of(accents[i])
-    c.circle(x, LY, 46, "#0f172a", stroke=col, sw=5, glow=c.glow(col, 14))
-    c.text(x, LY + 15, str(i + 1), size=42, fill=col, anchor="middle")
-    c.text(x, 340, titles[i], size=32, fill=col, anchor="middle")
-    c.lines(x, 382, subs[i], size=22, fill=MUTED, anchor="middle", lh=30)
+    c.circle(x, LY, 58, "#0f172a", stroke=col, sw=6, glow=c.glow(col, 16))
+    c.text(x, LY + 18, str(i + 1), size=50, fill=col, anchor="middle")
+    c.text(x, 565, titles[i], size=38, fill=col, anchor="middle")
+    c.lines(x, 618, details[i], size=24, fill=TEXT, anchor="middle", lh=36, weight=600)
 
 
-def row(cx, y, items):
-    ws = [len(s) * 22 * 0.6 + 22 * 1.4 for s, _ in items]
-    x = cx - (sum(ws) + 14 * (len(ws) - 1)) / 2
+def row(cx, y, items, size=22):
+    ws = [est_width(s, size) + size * 1.4 for s, _ in items]
+    x = cx - (sum(ws) + 12 * (len(ws) - 1)) / 2
     for (s, acc), w in zip(items, ws):
-        c.pill(x + w / 2, y, s, acc, size=22)
-        x += w + 14
+        c.pill(x + w / 2, y, s, acc, size=size)
+        x += w + 12
 
 
-row(xs[1], 490, [("ROGUE", "orange"), ("DRIFTED", "orange"), ("MISSING", "orange")])
-row(xs[2], 490, [("Enforce", "orange"), ("Adopt", "mint")])
-row(xs[3], 490, [("MATCHED", "mint")])
+PY = 800
+row(xs[1], PY, [("ROGUE", "rose"), ("DRIFTED", "amber"), ("MISSING", "cyan")])
+row(xs[2], PY, [("Enforce", "mint"), ("Adopt", "violet"), ("Whitelist", "slate")])
+row(xs[3], PY, [("MATCHED", "mint"), ("IN SYNC", "mint")])
 c.save("timeline")

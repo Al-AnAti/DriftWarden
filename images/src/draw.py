@@ -28,17 +28,28 @@ MINT = "#34d399"
 ORANGE = "#fb923c"
 SLATE = "#94a3b8"
 
-ACCENT = {"cyan": CYAN, "mint": MINT, "orange": ORANGE, "slate": SLATE}
+ROSE = "#fb7185"
+VIOLET = "#a78bfa"
+AMBER = "#fbbf24"
 
-# Drift states: mint is "in sync", orange is "the host disagrees with Git",
-# cyan is "waiting on a pull request or a restart".
+ACCENT = {
+    "cyan": CYAN,
+    "mint": MINT,
+    "orange": ORANGE,
+    "slate": SLATE,
+    "rose": ROSE,
+    "violet": VIOLET,
+    "amber": AMBER,
+}
+
+# One colour per drift state, matching the dashboard's status pills.
 STATUS_ACCENT = {
     "MATCHED": "mint",
     "DRIFTED": "orange",
-    "MISSING": "orange",
-    "ROGUE": "orange",
-    "PENDING_ADOPTION": "cyan",
-    "AWAITING_RESTART": "cyan",
+    "MISSING": "cyan",
+    "ROGUE": "rose",
+    "PENDING_ADOPTION": "violet",
+    "AWAITING_RESTART": "amber",
 }
 
 
@@ -243,13 +254,20 @@ class Canvas:
         )
         return w
 
-    def label(self, x, y, s, accent=None, size=22, anchor="middle", weight=800, pad=10):
-        """Bold text on a background plate, for words that sit on top of a line."""
+    def label(self, x, y, s, accent=None, size=22, anchor="middle", weight=800, pad=10, angle=0):
+        """Bold text on a background plate, for words that sit on top of a line.
+
+        `angle` rotates the label about (x, y) so it can run along a diagonal arrow.
+        """
         fill = color_of(accent) if accent else MUTED
         w = est_width(s, size) + pad * 2
         x0 = x - w / 2 if anchor == "middle" else (x - pad if anchor == "start" else x - w + pad)
+        if angle:
+            self.parts.append(f'<g transform="rotate({angle:.1f} {x} {y})">')
         self.rect(x0, y - size * 0.95, w, size * 1.35, fill=self.bg or BG, stroke="none", rx=8)
         self.text(x, y, s, size=size, fill=fill, weight=weight, anchor=anchor)
+        if angle:
+            self.parts.append("</g>")
 
     def svg(self) -> str:
         bg = f'<rect width="100%" height="100%" fill="{self.bg}"/>' if self.bg else ""

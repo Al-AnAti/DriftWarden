@@ -1,56 +1,82 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="920" viewBox="0 0 1600 920" role="img" aria-labelledby="t">
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="t">
 <title id="t">DriftWarden drift states and the transitions between them</title>
-<defs><filter id="g22d3ee12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#22d3ee" flood-opacity="0.75"/></filter><filter id="g22d3ee6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#22d3ee" flood-opacity="0.6"/></filter><filter id="g22d3ee8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#22d3ee" flood-opacity="0.75"/></filter><filter id="g34d39912" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#34d399" flood-opacity="0.75"/></filter><filter id="g34d3996" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#34d399" flood-opacity="0.6"/></filter><filter id="gfb923c12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#fb923c" flood-opacity="0.75"/></filter><filter id="gfb923c6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1120"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#fb923c" flood-opacity="0.6"/></filter><marker id="m22d3ee" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/></marker><marker id="m34d399" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#34d399"/></marker><marker id="mfb923c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#fb923c"/></marker></defs>
+<defs><filter id="g22d3ee12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#22d3ee" flood-opacity="0.75"/></filter><filter id="g22d3ee6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#22d3ee" flood-opacity="0.6"/></filter><filter id="g22d3ee8" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#22d3ee" flood-opacity="0.75"/></filter><filter id="g34d39912" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#34d399" flood-opacity="0.75"/></filter><filter id="g34d3996" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#34d399" flood-opacity="0.6"/></filter><filter id="ga78bfa12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#a78bfa" flood-opacity="0.75"/></filter><filter id="ga78bfa6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#a78bfa" flood-opacity="0.6"/></filter><filter id="gfb718512" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#fb7185" flood-opacity="0.75"/></filter><filter id="gfb923c12" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#fb923c" flood-opacity="0.75"/></filter><filter id="gfb923c6" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#fb923c" flood-opacity="0.6"/></filter><filter id="gfbbf2412" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#fbbf24" flood-opacity="0.75"/></filter><filter id="gfbbf246" filterUnits="userSpaceOnUse" x="-100" y="-100" width="2120" height="1280"><feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#fbbf24" flood-opacity="0.6"/></filter><marker id="m22d3ee" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/></marker><marker id="m34d399" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#34d399"/></marker><marker id="ma78bfa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker><marker id="mfb923c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#fb923c"/></marker><marker id="mfbbf24" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#fbbf24"/></marker></defs>
 <rect width="100%" height="100%" fill="#0f172a"/>
 <rect x="60" y="43.68" width="10" height="39.6" rx="5" fill="#22d3ee" stroke="none" stroke-width="3" filter="url(#g22d3ee8)"/>
 <text x="90" y="78" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="44" fill="#f8fafc" font-weight="800" text-anchor="start">Drift states</text>
-<path d="M324.35843172047987,404.3786771954442 L603.5250983871466,270.3786771954442" fill="none" stroke="#fb923c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfb923c)" filter="url(#gfb923c6)"/>
-<rect x="334.2" y="279.1" width="191.6" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="430" y="300" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb923c" font-weight="800" text-anchor="middle">field changed</text>
-<path d="M615.6415682795201,295.6213228045558 L336.4749016128535,429.6213228045558" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
-<rect x="508.8" y="371.1" width="112.39999999999999" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="565" y="392" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">Enforce</text>
-<path d="M358.0,456.0 L582.0,456.0" fill="none" stroke="#fb923c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfb923c)" filter="url(#gfb923c6)"/>
-<rect x="341.2" y="419.1" width="257.6" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="470" y="440" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb923c" font-weight="800" text-anchor="middle">stopped or removed</text>
-<path d="M582.0,484.0 L358.0,484.0" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
-<rect x="413.8" y="501.1" width="112.39999999999999" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="470" y="522" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">Enforce</text>
-<path d="M400,694 L578,694" fill="none" stroke="#fb923c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfb923c)" filter="url(#gfb923c6)"/>
-<rect x="414.0" y="651.1" width="152.0" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="490" y="672" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb923c" font-weight="800" text-anchor="middle">docker run</text>
-<path d="M578,728 L400,728" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
-<rect x="361.2" y="747.1" width="257.6" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="490" y="768" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">Enforce removes it</text>
-<path d="M839.8620314628744,272.10448738599456 L1130.1953647962077,406.10448738599456" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<path d="M1120.1379685371257,427.89551261400544 L829.8046352037924,293.89551261400544" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 10" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<path d="M858.0,458.0 L1067.0,458.0" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<path d="M1067.0,482.0 L858.0,482.0" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 10" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<path d="M829.8046352037924,646.1044873859946 L1120.1379685371257,512.1044873859946" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<path d="M1130.1953647962077,533.8955126140054 L839.8620314628744,667.8955126140054" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 10" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<rect x="788.0" y="411.1" width="284.0" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="930" y="432" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle">Adopt → pull request</text>
-<rect x="860.6" y="499.1" width="138.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="930" y="520" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle">PR closed</text>
-<path d="M1240,417 L1240,140 L220,140 L220,417" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
-<rect x="660.6" y="127.1" width="138.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="730" y="148" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">PR merged</text>
-<path d="M1240,523 L1240,830 L393,830" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
-<rect x="427.40000000000003" y="817.1" width="825.1999999999999" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="840" y="838" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle">PR merged for a ROGUE: Git declares it, no Compose labels yet</text>
-<path d="M220,777 L220,523" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
-<rect x="71.4" y="629.1" width="297.2" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
-<text x="220" y="650" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">restarted with labels</text>
-<rect x="90.0" y="425.0" width="260" height="90" rx="22" fill="rgba(52,211,153,0.1)" stroke="#34d399" stroke-width="3" filter="url(#g34d39912)"/>
-<text x="220" y="479.36" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="26" fill="#34d399" font-weight="800" text-anchor="middle">MATCHED</text>
-<rect x="590.0" y="185.0" width="260" height="90" rx="22" fill="rgba(251,146,60,0.1)" stroke="#fb923c" stroke-width="3" filter="url(#gfb923c12)"/>
-<text x="720" y="239.36" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="26" fill="#fb923c" font-weight="800" text-anchor="middle">DRIFTED</text>
-<rect x="590.0" y="425.0" width="260" height="90" rx="22" fill="rgba(251,146,60,0.1)" stroke="#fb923c" stroke-width="3" filter="url(#gfb923c12)"/>
-<text x="720" y="479.36" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="26" fill="#fb923c" font-weight="800" text-anchor="middle">MISSING</text>
-<rect x="590.0" y="665.0" width="260" height="90" rx="22" fill="rgba(251,146,60,0.1)" stroke="#fb923c" stroke-width="3" filter="url(#gfb923c12)"/>
-<text x="720" y="719.36" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="26" fill="#fb923c" font-weight="800" text-anchor="middle">ROGUE</text>
-<rect x="1075.0" y="425.0" width="330" height="90" rx="22" fill="rgba(34,211,238,0.1)" stroke="#22d3ee" stroke-width="3" filter="url(#g22d3ee12)"/>
-<text x="1240" y="479.36" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="26" fill="#22d3ee" font-weight="800" text-anchor="middle">PENDING_ADOPTION</text>
-<rect x="55.0" y="785.0" width="330" height="90" rx="22" fill="rgba(34,211,238,0.1)" stroke="#22d3ee" stroke-width="3" filter="url(#g22d3ee12)"/>
-<text x="220" y="839.36" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="26" fill="#22d3ee" font-weight="800" text-anchor="middle">AWAITING_RESTART</text>
+<path d="M883.944736604057,273.08490270881225 L514.4710523935306,533.0849027088123" fill="none" stroke="#fb923c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfb923c)" filter="url(#gfb923c6)"/>
+<g transform="rotate(324.9 719.9256571210799 432.5259338036399)">
+<rect x="624.1256571210799" y="411.6259338036399" width="191.6" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="719.9256571210799" y="432.5259338036399" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fb923c" font-weight="800" text-anchor="middle">field changed</text>
+</g>
+<path d="M496.05526339594303,506.91509729118775 L865.5289476064693,246.91509729118775" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
+<g transform="rotate(-35.1 660.0743428789201 347.4740661963601)">
+<rect x="603.8743428789201" y="326.57406619636015" width="112.39999999999999" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="660.0743428789201" y="347.4740661963601" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">Enforce</text>
+</g>
+<path d="M976.0,260.0 L976.0,520.0" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m22d3ee)" filter="url(#g22d3ee6)"/>
+<g transform="rotate(-90.0 1012.0 390.0)">
+<rect x="889.8" y="369.1" width="244.4" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="1012.0" y="390.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#22d3ee" font-weight="800" text-anchor="middle">stopped / removed</text>
+</g>
+<path d="M944.0,520.0 L944.0,260.0" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
+<g transform="rotate(-90.0 908.0 390.0)">
+<rect x="851.8" y="369.1" width="112.39999999999999" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="908.0" y="390.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">Enforce</text>
+</g>
+<path d="M523.819129962037,626.460274558564 L873.2308946679194,846.460274558564" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ma78bfa)" filter="url(#ga78bfa6)"/>
+<g transform="rotate(32.2 717.7062900236792 705.995892315333)">
+<rect x="674.7062900236792" y="685.095892315333" width="86.0" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="717.7062900236792" y="705.995892315333" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle">Adopt</text>
+</g>
+<path d="M856.180870037963,873.539725441436 L506.7691053320805,653.539725441436" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 10" marker-end="url(#ma78bfa)" filter="url(#ga78bfa6)"/>
+<g transform="rotate(32.2 662.2937099763208 794.004107684667)">
+<rect x="592.8937099763208" y="773.104107684667" width="138.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="662.2937099763208" y="794.004107684667" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle">PR closed</text>
+</g>
+<path d="M976.0,640.0 L976.0,860.0" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ma78bfa)" filter="url(#ga78bfa6)"/>
+<g transform="rotate(-90.0 1012.0 750.0)">
+<rect x="969.0" y="729.1" width="86.0" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="1012.0" y="750.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle">Adopt</text>
+</g>
+<path d="M944.0,860.0 L944.0,640.0" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 10" marker-end="url(#ma78bfa)" filter="url(#ga78bfa6)"/>
+<g transform="rotate(-90.0 908.0 750.0)">
+<rect x="838.6" y="729.1" width="138.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="908.0" y="750.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle">PR closed</text>
+</g>
+<path d="M1413.2308946679195,653.539725441436 L1063.819129962037,873.539725441436" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ma78bfa)" filter="url(#ga78bfa6)"/>
+<g transform="rotate(327.8 1257.7062900236792 794.004107684667)">
+<rect x="1214.7062900236792" y="773.104107684667" width="86.0" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="1257.7062900236792" y="794.004107684667" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle">Adopt</text>
+</g>
+<path d="M1046.7691053320805,846.460274558564 L1396.180870037963,626.460274558564" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 10" marker-end="url(#ma78bfa)" filter="url(#ga78bfa6)"/>
+<g transform="rotate(-32.2 1202.2937099763208 705.995892315333)">
+<rect x="1132.8937099763207" y="685.095892315333" width="138.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="1202.2937099763208" y="705.995892315333" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#a78bfa" font-weight="800" text-anchor="middle">PR closed</text>
+</g>
+<path d="M760,920 L160,920 L160,200 L800,200" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
+<g transform="rotate(-90.0 160 560)">
+<rect x="90.6" y="539.1" width="138.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="160" y="560" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">PR merged</text>
+</g>
+<path d="M1160.0,920.0 L1300.0,920.0" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mfbbf24)" filter="url(#gfbbf246)"/>
+<rect x="1081.4" y="987.1" width="297.2" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="1230.0" y="1008.0" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#fbbf24" font-weight="800" text-anchor="middle">PR merged for a ROGUE</text>
+<path d="M1700,920 L1760,920 L1760,200 L1120,200" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m34d399)" filter="url(#g34d3996)"/>
+<g transform="rotate(-90.0 1760 560)">
+<rect x="1558.6" y="539.1" width="402.8" height="29.700000000000003" rx="8" fill="#0f172a" stroke="none" stroke-width="3"/>
+<text x="1760" y="560" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" fill="#34d399" font-weight="800" text-anchor="middle">restarted with Compose labels</text>
+</g>
+<rect x="810.0" y="150.0" width="300" height="100" rx="22" fill="rgba(52,211,153,0.1)" stroke="#34d399" stroke-width="3" filter="url(#g34d39912)"/>
+<text x="960" y="210.8" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="30" fill="#34d399" font-weight="800" text-anchor="middle">MATCHED</text>
+<rect x="270.0" y="530.0" width="300" height="100" rx="22" fill="rgba(251,146,60,0.1)" stroke="#fb923c" stroke-width="3" filter="url(#gfb923c12)"/>
+<text x="420" y="590.8" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="30" fill="#fb923c" font-weight="800" text-anchor="middle">DRIFTED</text>
+<rect x="810.0" y="530.0" width="300" height="100" rx="22" fill="rgba(34,211,238,0.1)" stroke="#22d3ee" stroke-width="3" filter="url(#g22d3ee12)"/>
+<text x="960" y="590.8" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="30" fill="#22d3ee" font-weight="800" text-anchor="middle">MISSING</text>
+<rect x="1350.0" y="530.0" width="300" height="100" rx="22" fill="rgba(251,113,133,0.1)" stroke="#fb7185" stroke-width="3" filter="url(#gfb718512)"/>
+<text x="1500" y="590.8" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="30" fill="#fb7185" font-weight="800" text-anchor="middle">ROGUE</text>
+<rect x="770.0" y="870.0" width="380" height="100" rx="22" fill="rgba(167,139,250,0.1)" stroke="#a78bfa" stroke-width="3" filter="url(#ga78bfa12)"/>
+<text x="960" y="930.8" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="30" fill="#a78bfa" font-weight="800" text-anchor="middle">PENDING_ADOPTION</text>
+<rect x="1310.0" y="870.0" width="380" height="100" rx="22" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="3" filter="url(#gfbbf2412)"/>
+<text x="1500" y="930.8" font-family="'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" font-size="30" fill="#fbbf24" font-weight="800" text-anchor="middle">AWAITING_RESTART</text>
 </svg>

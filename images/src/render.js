@@ -77,7 +77,7 @@ function withHeadlessBrowser(bin) {
     for (const f of files) {
       const svg = fs.readFileSync(path.join(dir, f), 'utf8');
       const { w, h } = size(svg);
-      const html = path.join(tmp, f.replace(/\.svg$/, '.html'));
+      const html = path.join(tmp, path.basename(f).replace(/\.svg$/, '.html'));
       fs.writeFileSync(html, `<!doctype html><html><body style="margin:0;background:${BG}">${svg}</body></html>`);
       const out = path.join(dir, f.replace(/\.svg$/, '.png'));
       fs.rmSync(out, { force: true });

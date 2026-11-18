@@ -1,6 +1,6 @@
 # DriftWarden: GitOps drift guardrail for standalone Docker hosts.
 #
-# Run with the host Docker socket mounted (or simply `make start`):
+# Run with the host Docker socket mounted (or simply `warden start`):
 #   docker run -d --name driftwarden \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
 #     -v "$PWD/data:/data" -e DATABASE_URL=sqlite:////data/warden.db \
@@ -11,7 +11,7 @@
 #
 # Remediation uses the Docker SDK only (containers.create/start/stop/remove over
 # the mounted socket); no docker CLI or compose plugin is needed in the image.
-# Mount the host's /etc/hostname at /etc/host_hostname:ro (make start does on
+# Mount the host's /etc/hostname at /etc/host_hostname:ro (warden start does on
 # Linux) or set WARDEN_HOSTNAME so the UI, audit rows and pull requests name
 # the real host rather than this container's id.
 
@@ -25,7 +25,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# `make start` mounts ./data here and points DATABASE_URL at /data/warden.db.
+# `warden start` mounts ./data here and points DATABASE_URL at /data/warden.db.
 RUN mkdir -p /data
 VOLUME ["/data"]
 

@@ -18,7 +18,7 @@ from typing import Any
 from loguru import logger
 
 HOST_HOSTNAME_FILE = Path("/etc/host_hostname")
-"""Where ``make start`` mounts the host's ``/etc/hostname`` read-only."""
+"""Where ``warden start`` mounts the host's ``/etc/hostname`` read-only."""
 
 
 def _read_mounted_hostname(path: Path = HOST_HOSTNAME_FILE) -> str | None:

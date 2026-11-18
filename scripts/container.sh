@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Containerised DriftWarden: build the image and run it with the Docker socket
-# and a persistent ./data directory mounted. Invoked by `make start` / `make stop`
-# through Git Bash on Windows and plain bash elsewhere, so the recipe never
-# depends on cmd.exe or PowerShell syntax.
+# and a persistent ./data directory mounted. Invoked by `warden start` / `stop` /
+# `logs` (poethepoet tasks in pyproject.toml) through Git Bash on Windows and
+# plain bash elsewhere, so it never depends on cmd.exe or PowerShell syntax.
 #
 # Usage: scripts/container.sh start|stop|logs|status [IMAGE] [CONTAINER] [PORT]
-# The optional positional arguments (passed by the Makefile, which may itself be
-# running under cmd.exe where VAR=value prefixes do not exist) override the
-# environment variables IMAGE, CONTAINER, PORT; DATA_DIR comes from the environment.
+# The optional positional arguments (passed by the warden tasks from their
+# --image / --container / --port options) override the environment variables
+# IMAGE, CONTAINER, PORT; DATA_DIR comes from the environment.
 
 set -euo pipefail
 
@@ -66,7 +66,7 @@ case "${1:-}" in
       -v "$DATA_HOST:/data" \
       "${HOSTNAME_MOUNT[@]}" \
       "$IMAGE" >/dev/null
-    echo "✅ $CONTAINER is up. Logs: make logs  Stop: make stop"
+    echo "✅ $CONTAINER is up. Logs: warden logs  Stop: warden stop"
     ;;
   stop)
     if docker rm -f "$CONTAINER" >/dev/null 2>&1; then

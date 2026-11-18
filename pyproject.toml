@@ -43,8 +43,15 @@ dev = [
     
     # Linting & Formatting
     "ruff>=0.1.0",
-    "mypy>=1.8.0"
+    "mypy>=1.8.0",
+
+    # Task runner behind the `warden` command
+    "poethepoet>=0.30.0",
 ]
+
+[project.scripts]
+# `warden <task>` runs the [tool.poe.tasks] below (needs the dev extra installed).
+warden = "poethepoet:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -72,3 +79,114 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-v --strict-markers"
 asyncio_mode = "auto"
+
+# ==========================================================================
+# Project tasks: `warden <task>` (or `poe <task>`), replacing the old Makefile.
+# Run `warden` with no arguments to list them. Tool commands resolve from
+# ./venv automatically when it exists, so the venv does not need activating.
+# Shell scripts run through Git Bash on Windows (never WSL's bash).
+# ==========================================================================
+
+[tool.poe]
+verbosity = 0
+
+[tool.poe.env]
+# Import root for every task (same as the pytest and mypy settings above).
+PYTHONPATH = "src"
+
+[tool.poe.tasks.install]
+help = "Install the runtime dependencies (editable)"
+cmd = "pip install -e ."
+
+[tool.poe.tasks.install-dev]
+help = "Install runtime and development dependencies (editable)"
+cmd = 'pip install -e ".[dev]"'
+
+[tool.poe.tasks.format]
+help = "Format with ruff and apply auto-fixable lint"
+sequence = ["ruff format .", "ruff check --fix ."]
+default_item_type = "cmd"
+
+[tool.poe.tasks.lint]
+help = "Lint with ruff"
+cmd = "ruff check ."
+
+[tool.poe.tasks.typecheck]
+help = "Strict static type analysis with mypy"
+cmd = "mypy src/"
+
+[tool.poe.tasks.test]
+help = "Run the test suite (extra arguments go to pytest, e.g. warden test -k revoke)"
+cmd = "pytest tests/ -v"
+
+[tool.poe.tasks.coverage]
+help = "Run the tests with line coverage per file"
+cmd = "pytest tests/ -q --cov=src --cov-report=term-missing"
+
+[tool.poe.tasks.check]
+help = "CI gate: format check, lint, typecheck and tests; mutates nothing"
+sequence = ["ruff format --check .", "ruff check .", "mypy src/", "pytest tests/"]
+default_item_type = "cmd"
+
+[tool.poe.tasks.dev]
+help = "Run DriftWarden on the host with live reload (database: DATABASE_URL in .env)"
+cmd = "uvicorn web.app:app --app-dir src --reload --port ${port}"
+args = [{ name = "port", options = ["--port", "-p"], default = "8000", help = "Host port" }]
+
+[tool.poe.tasks.run]
+help = "Alias for dev"
+ref = "dev"
+
+[tool.poe.tasks.start]
+help = "Build the image and run DriftWarden as a container (socket and ./data mounted)"
+shell = 'bash scripts/container.sh start "$image" "$container" "$port"'
+interpreter = "bash"
+args = [
+    { name = "image", options = ["--image"], default = "driftwarden:latest", help = "Image tag" },
+    { name = "container", options = ["--container"], default = "driftwarden", help = "Container name" },
+    { name = "port", options = ["--port", "-p"], default = "8000", help = "Host port" },
+]
+
+[tool.poe.tasks.stop]
+help = "Remove the container started by `warden start` (./data is kept)"
+shell = 'bash scripts/container.sh stop "$image" "$container" "$port"'
+interpreter = "bash"
+args = [
+    { name = "image", options = ["--image"], default = "driftwarden:latest", help = "Image tag" },
+    { name = "container", options = ["--container"], default = "driftwarden", help = "Container name" },
+    { name = "port", options = ["--port", "-p"], default = "8000", help = "Host port" },
+]
+
+[tool.poe.tasks.logs]
+help = "Follow the container's logs"
+shell = 'bash scripts/container.sh logs "$image" "$container" "$port"'
+interpreter = "bash"
+args = [
+    { name = "image", options = ["--image"], default = "driftwarden:latest", help = "Image tag" },
+    { name = "container", options = ["--container"], default = "driftwarden", help = "Container name" },
+    { name = "port", options = ["--port", "-p"], default = "8000", help = "Host port" },
+]
+
+[tool.poe.tasks.clean]
+help = "Delete the tool caches and every __pycache__"
+shell = "bash scripts/clean.sh"
+interpreter = "bash"
+
+[tool.poe.tasks.reset-logs]
+help = "Clear the drift event and audit log history"
+cmd = "python scripts/reset_logs.py"
+
+[tool.poe.tasks.demo-up]
+help = "Demo: start the fixture stack with Docker Compose"
+shell = "bash scripts/demo.sh up"
+interpreter = "bash"
+
+[tool.poe.tasks.demo-drift]
+help = "Demo: inject one rogue, one missing and one drifted container"
+shell = "bash scripts/demo.sh drift"
+interpreter = "bash"
+
+[tool.poe.tasks.demo-down]
+help = "Demo: tear the fixture stack down"
+shell = "bash scripts/demo.sh clean"
+interpreter = "bash"

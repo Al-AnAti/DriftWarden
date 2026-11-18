@@ -1,7 +1,7 @@
 # DriftWarden — project overview
 
 This page explains what DriftWarden is, how a change flows through it from GitHub to a running
-container and back, which libraries it is built on, and the Makefile targets, scripts and tests
+container and back, which libraries it is built on, and the `warden` tasks, scripts and tests
 that make it easy to run and check. The three companion pages go package by package:
 
 * [`shared.md`](shared.md) — the data contract (`src/shared`): enums, exceptions, models.
@@ -175,8 +175,8 @@ not land. In `enforce` mode the Enforce arrows fire by themselves after the grac
 | `src/warden` | Settings, Compose parsing, Docker, classification, reconcile loop, GitHub, YAML mutation. | `shared` only (the SQLite store is reached through a `Protocol`) |
 | `src/web` | FastAPI app and lifespan, SQLAlchemy tables and repository, pages, API, SSE, JS. | `shared` and `warden` |
 
-The import root is `src` (`PYTHONPATH=src`, set by the Makefile, `pyproject.toml` for pytest
-and mypy, and the Dockerfile), so modules are `shared.models`, `warden.engine.reconciler`,
+The import root is `src` (`PYTHONPATH=src`, set by `[tool.poe.env]` for every `warden` task,
+`pyproject.toml` for pytest and mypy, and the Dockerfile), so modules are `shared.models`, `warden.engine.reconciler`,
 `web.app`.
 
 **What lives where at runtime**
@@ -198,7 +198,7 @@ Runtime:
 | Package | Version | Used for |
 | --- | --- | --- |
 | `fastapi` | ≥ 0.100 | The control plane: routes, dependency on `Request`, lifespan, exception handler. |
-| `uvicorn[standard]` | ≥ 0.23 | The ASGI server (`make start`, Dockerfile CMD). |
+| `uvicorn[standard]` | ≥ 0.23 | The ASGI server (`warden dev`, Dockerfile CMD). |
 | `jinja2` | ≥ 3.1.2 | Server-rendered templates. |
 | `docker` (docker-py) | ≥ 7.0 | Event stream, inspect, create/start/stop/remove, image pull, networks. |
 | `PyGithub` | ≥ 2.1 | Baseline fetch (with ETag through the raw requester), branch and commit creation, pull requests. |
@@ -242,32 +242,44 @@ override `.env` until "Reset". `.env` itself is never modified by the applicatio
 
 ---
 
-## 6. Tooling: Makefile, scripts, tests, CI
+## 6. Tooling: `warden` tasks, scripts, tests, CI
 
-### Makefile targets
+### `warden` tasks
 
-The Makefile exports `PYTHONPATH=src` and, on Windows, routes shell scripts through Git Bash
-instead of WSL.
+Every project command is a [poethepoet](https://poethepoet.natn.io/) task under
+`[tool.poe.tasks]` in `pyproject.toml`; there is no Makefile. `pip install -e ".[dev]"`
+installs poethepoet and registers the `warden` console script
+(`[project.scripts] warden = "poethepoet:main"`), so `warden <task>` runs a task (and so does
+`poe <task>`). `warden` alone lists every task with its options. `[tool.poe.env]` sets
+`PYTHONPATH=src` for every task. Poe's automatic executor finds `./venv`, so `ruff`, `pytest`,
+`uvicorn` and `pip` resolve from it even when the venv is not activated (in CI, with no venv,
+they come from the runner's Python). Shell tasks use `interpreter = "bash"`, which on Windows
+resolves Git Bash before anything on `PATH`, so WSL's `bash.exe` is never picked up. For `cmd`
+tasks without declared options, extra arguments are appended: `warden test -k revoke`.
 
-| Target | What it runs | When to use it |
+| Task | What it runs | When to use it |
 | --- | --- | --- |
-| `make install` | `pip install -e .` | Runtime dependencies only. |
-| `make install-dev` | `pip install -e ".[dev]"` | Everything, including ruff, mypy, pytest. |
-| `make dev` | `uvicorn web.app:app --app-dir src --reload --port 8000` | Run the control plane and engine on the host with live reload at http://localhost:8000. |
-| `make start` | `scripts/container.sh start` (through Git Bash on Windows): `docker build -t driftwarden:latest .` then `docker run -d --name driftwarden -p 8000:8000 --env-file .env -e API_HOST=0.0.0.0 -e DATABASE_URL=sqlite:////data/warden.db -v //var/run/docker.sock:/var/run/docker.sock -v <project>/data:/data driftwarden:latest` | Run DriftWarden as a container: the socket is mounted, the SQLite database lives in `./data/warden.db` so it survives recreation, and the API listens on all interfaces inside the container. `IMAGE`, `CONTAINER` and `PORT` can be overridden. |
-| `make stop` | `scripts/container.sh stop` | Remove the container started by `make start`; `./data` is kept. |
-| `make logs` | `scripts/container.sh logs` | Follow the container's logs. |
-| `make format` | `ruff format .` then `ruff check --fix .` | Fix formatting and auto-fixable lint. |
-| `make lint` | `ruff check .` | Lint only. |
-| `make typecheck` | `mypy src/` | Strict typing. |
-| `make test` | `pytest tests/ -v` | The suite. |
-| `make coverage` | `pytest tests/ -q --cov=src --cov-report=term-missing` | Line coverage per file. |
-| `make check` | `ruff format --check .`, `ruff check .`, `mypy src/`, `pytest tests/` | **The CI gate.** Run before every commit; it mutates nothing. |
-| `make clean` | `scripts/clean.sh` | Delete `.pytest_cache`, `.ruff_cache`, `.mypy_cache` and every `__pycache__`. |
-| `make reset-logs` | `python scripts/reset_logs.py` | Wipe the drift event and audit history (see below). |
-| `make demo-up` | `scripts/demo.sh up` | Start the fixture stack with Docker Compose. |
-| `make demo-drift` | `scripts/demo.sh drift` | Inject one rogue, one missing and one drifted container. |
-| `make demo-down` | `scripts/demo.sh clean` | Tear the demo down. |
+| `warden install` | `pip install -e .` | Runtime dependencies only. |
+| `warden install-dev` | `pip install -e ".[dev]"` | Everything, including ruff, mypy, pytest, poethepoet. The very first install has to be the plain `pip` command, because `warden` exists only afterwards. |
+| `warden dev` (alias `warden run`) | `uvicorn web.app:app --app-dir src --reload --port 8000` | Run the control plane and engine on the host with live reload at http://localhost:8000. `--port` / `-p` changes the port. |
+| `warden start` | `bash scripts/container.sh start <image> <container> <port>`: `docker build -t driftwarden:latest .` then `docker run -d --name driftwarden -p 8000:8000 --env-file .env -e API_HOST=0.0.0.0 -e DATABASE_URL=sqlite:////data/warden.db -v //var/run/docker.sock:/var/run/docker.sock -v <project>/data:/data driftwarden:latest` | Run DriftWarden as a container: the socket is mounted, the SQLite database lives in `./data/warden.db` so it survives recreation, and the API listens on all interfaces inside the container. `--image`, `--container` and `--port` override the defaults; `DATA_DIR` in the environment moves the data folder. |
+| `warden stop` | `bash scripts/container.sh stop …` | Remove the container started by `warden start`; `./data` is kept. Takes the same options. |
+| `warden logs` | `bash scripts/container.sh logs …` | Follow the container's logs (Ctrl+C to stop). |
+| `warden format` | `ruff format .` then `ruff check --fix .` | Fix formatting and auto-fixable lint. |
+| `warden lint` | `ruff check .` | Lint only. |
+| `warden typecheck` | `mypy src/` | Strict typing. |
+| `warden test` | `pytest tests/ -v` | The suite; extra arguments go to pytest. |
+| `warden coverage` | `pytest tests/ -q --cov=src --cov-report=term-missing` | Line coverage per file. |
+| `warden check` | `ruff format --check .`, `ruff check .`, `mypy src/`, `pytest tests/` (stops at the first failure) | **The CI gate.** Run before every commit; it mutates nothing. |
+| `warden clean` | `bash scripts/clean.sh` | Delete `.pytest_cache`, `.ruff_cache`, `.mypy_cache` and every `__pycache__`. |
+| `warden reset-logs` | `python scripts/reset_logs.py` | Wipe the drift event and audit history (see below). |
+| `warden demo-up` | `bash scripts/demo.sh up` | Start the fixture stack with Docker Compose. |
+| `warden demo-drift` | `bash scripts/demo.sh drift` | Inject one rogue, one missing and one drifted container. |
+| `warden demo-down` | `bash scripts/demo.sh clean` | Tear the demo down. |
+
+The `warden` console script is registered by every install, but poethepoet is a development
+dependency, so a runtime-only install (`pip install .`, as in the Dockerfile) has a `warden`
+command that cannot run. No task is meant to run inside the image.
 
 ### `scripts/demo.sh` — the presentation runner
 
@@ -342,29 +354,29 @@ The suite runs without Docker and without GitHub. `pytest.ini` options live in
 | `test_web_api.py` | The FastAPI app with the watcher swapped for `FakeWatcher`: every page renders, state and health, SSE delivery and transition payloads, action endpoints, adoption refused in mock mode, the simplified MISSING diff page, whitelist round trip, buffer and events endpoints, the diff gutter, settings endpoints, batch endpoint and scopes, revoke validation. |
 | `test_reset_logs.py` | `clear_logs` truncates only the two history tables; the script prints the confirmation and resolves `DATABASE_URL` from the environment. |
 
-Around 115 test cases run in a few seconds. `make check` must be green (format, lint, strict
+Around 125 test cases run in a few seconds. `warden check` must be green (format, lint, strict
 mypy, tests) before a commit.
 
 ### Quality tools
 
 * **ruff** — `[tool.ruff]` in `pyproject.toml`: line length 100, target `py310`, rules
-  `E` (pycodestyle), `F` (pyflakes), `I` (import sorting). `make format` fixes, `make lint`
-  reports, `make check` verifies formatting without changing files.
+  `E` (pycodestyle), `F` (pyflakes), `I` (import sorting). `warden format` fixes, `warden lint`
+  reports, `warden check` verifies formatting without changing files.
 * **mypy** — `strict = true` over the whole `src/` tree, with `mypy_path = src` and
   `explicit_package_bases` so the `shared` / `warden` / `web` packages resolve. Third-party
   packages without stubs are ignored. Tests and scripts are typed to the same standard.
-* **GitHub Actions** — `.github/workflows/ci.yaml` runs `make install-dev` and `make check` on
-  Python 3.10 for every push and pull request to `main`.
+* **GitHub Actions** — `.github/workflows/ci.yaml` runs `pip install -e ".[dev]"` and
+  `warden check` on Python 3.10 for every push and pull request to `main`.
 
 ### Running as a container
 
 `Dockerfile` builds a `python:3.12-slim` image with `PYTHONPATH=/app/src`, installs the
 project, copies `tests/fixtures` (so mock mode works inside the container), labels the image
 `warden.ignore=true`, declares a `/data` volume for the database and starts uvicorn on
-`API_HOST:API_PORT`. `make start` does the whole thing: build, mount `/var/run/docker.sock`
+`API_HOST:API_PORT`. `warden start` does the whole thing: build, mount `/var/run/docker.sock`
 and `./data:/data`, pass `--env-file .env` plus `API_HOST=0.0.0.0` and
 `DATABASE_URL=sqlite:////data/warden.db`. The container detects its own id and excludes itself
-from evaluation. `make dev` stays host-based with hot reload.
+from evaluation. `warden dev` stays host-based with hot reload.
 
 ---
 

@@ -24,10 +24,12 @@ Adhere to the repository layout:
 .
 ├── .env
 ├── .env.example
-├── Makefile
+├── pyproject.toml   (dependencies, tool config and the `warden` tasks)
 ├── scripts/
 │   ├── clean.sh
-│   └── demo.sh
+│   ├── container.sh
+│   ├── demo.sh
+│   └── reset_logs.py
 ├── src/
 │   ├── shared/
 │   │   ├── constants.py
@@ -89,14 +91,15 @@ Adhere to the repository layout:
 
 ---
 
-## 5. Verification Commands (Makefile Protocol)
+## 5. Verification Commands (`warden` tasks)
 
-Always validate modifications using the project `Makefile`. Execute these exact commands before considering any task complete:
+Always validate modifications using the project's `warden` tasks (poethepoet tasks in `pyproject.toml`, installed with `pip install -e ".[dev]"`). Execute these exact commands before considering any task complete:
 
-- **Format Code:** `make format` (runs `ruff format .` and `ruff check --fix .`)
-- **Lint Code:** `make lint` (runs `ruff check .`)
-- **Run Test Suite:** `make test` (runs `pytest tests/ -v`)
-- **Local Server Verification:** `make start` (runs `uvicorn web.app:app --app-dir src --reload --port 8000`)
+- **Format Code:** `warden format` (runs `ruff format .` and `ruff check --fix .`)
+- **Lint Code:** `warden lint` (runs `ruff check .`)
+- **Run Test Suite:** `warden test` (runs `pytest tests/ -v`)
+- **Full CI gate:** `warden check` (format check, lint, `mypy src/`, tests)
+- **Local Server Verification:** `warden dev` (runs `uvicorn web.app:app --app-dir src --reload --port 8000`)
 
 ### Test Environment Assumptions
 - Docker engine is active locally with the socket at `/var/run/docker.sock`.

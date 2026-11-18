@@ -46,7 +46,7 @@ Standalone Docker hosts drift when engineers bypass CI/CD with manual `docker ru
 
 Longer, package-by-package guides live in [`docs/`](docs/):
 
-* [`docs/overview.md`](docs/overview.md) — the project idea, the end-to-end workflow, dependencies, Makefile targets, scripts, tests and CI.
+* [`docs/overview.md`](docs/overview.md) — the project idea, the end-to-end workflow, dependencies, `warden` tasks, scripts, tests and CI.
 * [`docs/shared.md`](docs/shared.md) — `src/shared`: enums, exceptions and the Pydantic models that cross every boundary.
 * [`docs/warden.md`](docs/warden.md) — `src/warden`: settings, Compose parsing, Docker access, classification rules, the reconcile loop, enforcement, adoption and the buffer.
 * [`docs/web.md`](docs/web.md) — `src/web`: FastAPI app and lifespan, SQLite tables, pages, JSON API, the SSE stream and `dashboard.js`.
@@ -83,18 +83,18 @@ git clone <your-repo-url>
 cd DriftWarden
 python -m venv venv
 source venv/bin/activate      # Windows PowerShell: .\venv\Scripts\activate
-make install-dev
+pip install -e ".[dev]"       # installs the project, the dev tools and the `warden` command
 cp .env.example .env          # then fill in GITHUB_PAT, TARGET_REPO, BASELINE_FILE_PATH ...
-make start                    # http://localhost:8000
+warden start                  # http://localhost:8000
 ```
 
-`make dev` runs `uvicorn web.app:app --app-dir src` with live reload; the import root is always `src` (`PYTHONPATH=src`). `make start` runs the same application inside a container (see below).
+Every project command is a task in `pyproject.toml` (`[tool.poe.tasks]`, run by [poethepoet](https://poethepoet.natn.io/)) behind the `warden` console script; run `warden` on its own to list them. `warden dev` (alias `warden run`) runs `uvicorn web.app:app --app-dir src` with live reload; the import root is always `src` (`PYTHONPATH=src`). `warden start` runs the same application inside a container (see below).
 
 ### Running as a container
 
 ```bash
-make start   # docker build + docker run with the socket and ./data mounted, API_HOST=0.0.0.0
-make stop
+warden start   # docker build + docker run with the socket and ./data mounted, API_HOST=0.0.0.0
+warden stop
 ```
 
 Equivalent by hand:
@@ -127,7 +127,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `EXCLUDED_NAME_PREFIXES` | `warden-,driftwarden,k8s_` | Containers never evaluated. |
 | `DOCKER_SOCKET_PATH` / `DOCKER_BASE_URL` | `/var/run/docker.sock` / unset | Socket path, or an explicit `npipe://` / `tcp://` URL; otherwise `docker.from_env()`. |
 | `DATABASE_URL` | `sqlite:///./warden.db` | Audit log, buffer, whitelist and drift events (WAL mode). |
-| `WARDEN_HOSTNAME` (alias `WARDEN_HOST_NAME`) | resolved | Host identity shown in the UI, audit rows and PR bodies. Resolution order: this variable, then `/etc/host_hostname` (the host's `/etc/hostname` mounted read-only, which `make start` does on Linux), then the Docker daemon's own name from `docker info`, then `platform.node()`; inside a container the last one would be the container id, which is why the cascade exists. |
+| `WARDEN_HOSTNAME` (alias `WARDEN_HOST_NAME`) | resolved | Host identity shown in the UI, audit rows and PR bodies. Resolution order: this variable, then `/etc/host_hostname` (the host's `/etc/hostname` mounted read-only, which `warden start` does on Linux), then the Docker daemon's own name from `docker info`, then `platform.node()`; inside a container the last one would be the container id, which is why the cascade exists. |
 
 ## 🖥️ Control plane
 
@@ -148,21 +148,33 @@ All settings come from environment variables or `.env` (see `.env.example`).
 
 ## 🛠️ Development workflow
 
-* `make dev` runs the control plane and engine on the host with live reload.
-* `make start` builds the image and runs DriftWarden as a container with `API_HOST=0.0.0.0`, the Docker socket mounted and the SQLite database kept in `./data/warden.db` (separate from the `./warden.db` that `make dev` uses through `.env`; point `DATABASE_URL` at `sqlite:///./data/warden.db` in `.env` if you want both to share one file); `make stop` removes the container, `make logs` follows it. The recipes run through `scripts/container.sh` in Git Bash, so they work from cmd.exe and PowerShell too.
-* `make check` runs `ruff format --check`, `ruff check`, `mypy src/` (strict) and `pytest`. Run it before every commit.
-* `make format`, `make lint`, `make typecheck`, `make test` run the individual tools.
-* `make clean` wipes caches.
-* `make reset-logs` runs `scripts/reset_logs.py`, which truncates the `drift_events` and `audit_log` tables in one transaction through the project's own engine.
+All commands are `warden <task>` (also available as `poe <task>`); `warden` alone lists them with their options. Tool commands resolve from `./venv` when it exists, so the venv does not have to be activated, and shell scripts run through Git Bash on Windows.
+
+* `warden dev` (alias `warden run`) runs the control plane and engine on the host with live reload; `--port` changes the port.
+* `warden start` builds the image and runs DriftWarden as a container with `API_HOST=0.0.0.0`, the Docker socket mounted and the SQLite database kept in `./data/warden.db` (separate from the `./warden.db` that `warden dev` uses through `.env`; point `DATABASE_URL` at `sqlite:///./data/warden.db` in `.env` if you want both to share one file); `warden stop` removes the container, `warden logs` follows it. `--image`, `--container` and `--port` override the defaults (`warden start --port 9000`). The tasks run `scripts/container.sh` in Git Bash, so they work from cmd.exe and PowerShell too.
+* `warden check` runs `ruff format --check`, `ruff check`, `mypy src/` (strict) and `pytest`, stopping at the first failure. Run it before every commit.
+* `warden format`, `warden lint`, `warden typecheck`, `warden test` run the individual tools; extra arguments go to the tool (`warden test -k revoke`). `warden coverage` adds per-file line coverage.
+* `warden clean` wipes caches.
+* `warden reset-logs` runs `scripts/reset_logs.py`, which truncates the `drift_events` and `audit_log` tables in one transaction through the project's own engine.
+* `warden install` / `warden install-dev` reinstall the project in editable mode once `warden` exists.
+
+| Old Makefile target | `warden` task |
+| --- | --- |
+| `make install`, `make install-dev` | `warden install`, `warden install-dev` |
+| `make format`, `lint`, `typecheck`, `test`, `coverage`, `check` | `warden format`, `lint`, `typecheck`, `test`, `coverage`, `check` |
+| `make dev` | `warden dev` (or `warden run`) |
+| `make start`, `stop`, `logs` (with `PORT=…`) | `warden start`, `stop`, `logs` (with `--port …`) |
+| `make clean`, `make reset-logs` | `warden clean`, `warden reset-logs` |
+| `make demo-up`, `demo-drift`, `demo-down` | `warden demo-up`, `demo-drift`, `demo-down` |
 
 Conventions: Python 3.10 syntax floor, `X | None` unions, Pydantic at every boundary and dataclasses inside the engine, Loguru only, `ruamel.yaml` round-trip only, PyGithub only (no subprocess git), no SPA frameworks.
 
 ## 🎬 Demo runners
 
 ```bash
-make demo-up         # docker compose up the fixture stack (project infrastructure-test)
-make demo-drift      # rogue-web (nginx:alpine on 8088:80, no env needed), delete web (MISSING), spoofed cache (DRIFTED)
-make demo-down       # tear everything down
+warden demo-up       # docker compose up the fixture stack (project infrastructure-test)
+warden demo-drift    # rogue-web (nginx:alpine on 8088:80, no env needed), delete web (MISSING), spoofed cache (DRIFTED)
+warden demo-down     # tear everything down
 ```
 
-With the dashboard open, `make demo-drift` shows one `ROGUE`, one `MISSING` and one `DRIFTED` entry within the debounce window. Click **Enforce** on the cache to recreate it from Git, **Enforce** on `web` to spin it up, or **Adopt** on `rogue-web` to open a pull request on `TARGET_REPO`; once that PR merges the container shows as `AWAITING_RESTART` until Compose or Enforce recreates it with its labels and project network.
+With the dashboard open, `warden demo-drift` shows one `ROGUE`, one `MISSING` and one `DRIFTED` entry within the debounce window. Click **Enforce** on the cache to recreate it from Git, **Enforce** on `web` to spin it up, or **Adopt** on `rogue-web` to open a pull request on `TARGET_REPO`; once that PR merges the container shows as `AWAITING_RESTART` until Compose or Enforce recreates it with its labels and project network.

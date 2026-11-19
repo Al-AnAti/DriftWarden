@@ -54,6 +54,8 @@ class FakeWatcher:
         self.connected = True
         self.last_error: str | None = None
         self.on_recreate: Callable[[ParsedService, str], LiveContainer] | None = None
+        self.missing_images: set[str] = set()
+        self.restored: list[tuple[str, str]] = []
 
     def list_containers(self) -> list[LiveContainer]:
         if self.fail_listing:
@@ -75,6 +77,76 @@ class FakeWatcher:
     def image_default_labels(self, image_ref: str) -> dict[str, str]:
         return {}
 
+    def container_spec(self, container_id: str) -> dict[str, Any] | None:
+        container = self.inspect(container_id)
+        if container is None:
+            return None
+        return {
+            "version": 1,
+            "id": container.id,
+            "name": container.name,
+            "image": container.image,
+            "image_id": container.image_id,
+            "env": [f"{k}={v}" for k, v in container.environment.items()],
+            "labels": dict(container.labels),
+            "cmd": None,
+            "entrypoint": None,
+            "working_dir": None,
+            "user": None,
+            "port_bindings": {},
+            "ports": list(container.ports),
+            "mounts": [
+                {
+                    "type": m.kind,
+                    "name": m.source if m.kind == "volume" else "",
+                    "source": m.source,
+                    "target": m.target,
+                    "read_only": m.read_only,
+                }
+                for m in container.mounts
+            ],
+            "restart_policy": {"Name": container.restart, "MaximumRetryCount": 0},
+            "networks": list(container.networks),
+        }
+
+    def ensure_image(self, image: str) -> None:
+        if image in self.missing_images:
+            from shared.exceptions import ContainerRecreateError
+
+            raise ContainerRecreateError(f"Image {image} is no longer available")
+
+    def restore_container(self, spec: dict[str, Any], *, action_id: str) -> tuple[str, list[str]]:
+        from shared.exceptions import ContainerRecreateError
+        from warden.core.docker_watcher import MountInfo
+
+        name = str(spec["name"])
+        if any(c.name == name for c in self.containers):
+            raise ContainerRecreateError(f"A container named {name} already exists")
+        self.ensure_image(str(spec["image"]))
+        new_id = ("x" + name).ljust(64, "0")[:64]
+        env = dict(item.split("=", 1) for item in spec.get("env") or [] if "=" in item)
+        self.containers.append(
+            LiveContainer(
+                id=new_id,
+                name=name,
+                image=str(spec["image"]),
+                image_id=str(spec.get("image_id") or ""),
+                state="running",
+                created="2026-11-19T00:00:00Z",
+                labels=dict(spec.get("labels") or {}),
+                environment=env,
+                ports=list(spec.get("ports") or []),
+                mounts=[
+                    MountInfo(m["type"], m["source"], m["target"], bool(m["read_only"]))
+                    for m in spec.get("mounts") or []
+                ],
+                restart=str((spec.get("restart_policy") or {}).get("Name") or "no"),
+                networks=list(spec.get("networks") or []),
+            )
+        )
+        self.restored.append((name, action_id))
+        return new_id, []
+
     def stop_and_remove(self, container_id: str, timeout: int = 10) -> None:
         self.removed.append(container_id)
         self.containers = [c for c in self.containers if c.id != container_id]
@@ -91,7 +163,9 @@ class FakeWatcher:
         name = service.container_name or f"{project}-{service.service_name}-1"
         self.containers = [c for c in self.containers if c.name != name]
         if self.on_recreate is not None:
-            self.containers.append(self.on_recreate(service, project))
+            created = self.on_recreate(service, project)
+            self.containers.append(created)
+            return created.id
         return "new" + service.service_name.ljust(61, "0")
 
     async def pump_events(
@@ -117,6 +191,11 @@ class FakeGitHub:
         self.pr_states: dict[int, str] = {}
         self.pull_state_error = False
         self.closed: list[tuple[int, str]] = []
+        self.deleted_branches: list[str] = []
+
+    def delete_branch(self, branch: str) -> bool:
+        self.deleted_branches.append(branch)
+        return True
 
     def close_pull(self, number: int, comment: str) -> None:
         self.closed.append((number, comment))

@@ -4,17 +4,33 @@ The concrete implementation lives in ``web.db.repository.Store``; the engine
 only sees this structural protocol so ``warden`` never imports ``web``.
 """
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from shared.constants import AuditAction, DriftStatus, WhitelistTargetType
-from shared.models import PendingAdoption, WhitelistEntry
+from shared.models import AuditLogEntry, PendingAdoption, WhitelistEntry
 
 
 class StateStore(Protocol):
     """Durable state the reconciler reads and writes."""
 
-    def record_audit(self, action: AuditAction, target: str, details: str | None = None) -> int:
-        """Append an audit row and return its id."""
+    def record_audit(
+        self,
+        action: AuditAction,
+        target: str,
+        details: str | None = None,
+        *,
+        snapshot: dict[str, Any] | None = None,
+        reverses_id: int | None = None,
+    ) -> int:
+        """Append an audit row (optionally with a reversal snapshot) and return its id."""
+        ...
+
+    def get_audit(self, entry_id: int) -> tuple[AuditLogEntry, dict[str, Any] | None] | None:
+        """One audit entry with its reversal state and snapshot."""
+        ...
+
+    def adoption_entries_for_pr(self, pr_number: int) -> list[AuditLogEntry]:
+        """Unreversed adoption entries that share a pull request."""
         ...
 
     def add_pending(

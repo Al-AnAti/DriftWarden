@@ -117,6 +117,9 @@ Step by step:
    | **Enforce All / Adopt All** | a scope: all, rogue, drifted, missing | Enforce All applies Enforce to every entry in scope and reports succeeded/failed counts. Adopt All puts every add / sync / remove into **one** PR on a `warden/batch-adopt-*` branch with a checklist body. |
    | **Whitelist** | ROGUE | Exempts the container (or its whole Compose project) from evaluation; stored in SQLite, revocable on Cluster Config. |
    | **Revoke Buffer** | a buffered entry | Comments on and closes the PR and evicts every entry that shares it; the workloads return to their real state next cycle. |
+   | **Reverse** (Events Log) | an `enforce_kill`, `revert_completed` or `adopt_pr_opened` audit row | Undoes that action from the snapshot recorded with it. Enforce that removed a container: the container is recreated from its recorded configuration and reattached to its volumes (filesystem changes outside volumes are lost; a deleted image that cannot be pulled fails clearly). Enforce that recreated a service: the created container is removed and the previous one restored. Adopt: the PR is closed with a comment, its `warden/` branch deleted and every buffer entry on it evicted. A merged PR is refused (undo it with a revert commit in Git); Enforce reversals are refused while `WARDEN_MODE=enforce`. Each attempt is recorded as `reversal_completed`, `reversal_failed` (retryable) or `reversal_refused`, linked to the original row by `reverses_id`; original rows are never edited. |
+
+   **Enforce All** is disabled when nothing is Rogue, Drifted, Missing or Awaiting restart, and **Adopt All** when nothing is Rogue, Drifted or Missing; the buttons update live with every snapshot.
 
 7. **The buffer.** After Adopt, the entry becomes `PENDING_ADOPTION`: still visible, exempt
    from enforcement, linked to its PR. The PR poller follows it: **merged** → the baseline is
@@ -183,7 +186,7 @@ The import root is `src` (`PYTHONPATH=src`, set by `[tool.poe.env]` for every `w
 
 | In memory (lost on restart, rebuilt on the first cycle) | In SQLite (`warden.db`, WAL mode) |
 | --- | --- |
-| the parsed baseline and its ETag | `audit_log` — every action and detection |
+| the parsed baseline and its ETag | `audit_log` — every action and detection; destructive actions carry a JSON `snapshot` (never shown in the UI or API) used to reverse them, and reversal rows point back with `reverses_id` |
 | the current `HostSnapshot` | `drift_events` — every status transition |
 | the own-action cache, enforcement cooldowns, image-default caches | `pending_adoptions` — the buffer and its history |
 | the whitelist index and buffer dict (copies of the tables) | `whitelisted_entities` — exemptions |

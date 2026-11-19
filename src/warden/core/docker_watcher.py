@@ -203,6 +203,92 @@ def container_from_attrs(attrs: dict[str, Any]) -> LiveContainer:
     )
 
 
+def spec_from_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    """Capture what is needed to recreate a container exactly, from ``docker inspect``.
+
+    The result is JSON-safe and stored with the audit entry of a destructive action
+    so the action can be reversed later.
+
+    Args:
+        attrs: The inspect payload.
+
+    Returns:
+        Image, name, environment, labels, command, ports, mounts, restart policy
+        and networks of the container.
+    """
+    config = attrs.get("Config") or {}
+    host_config = attrs.get("HostConfig") or {}
+    network_settings = attrs.get("NetworkSettings") or {}
+    restart = host_config.get("RestartPolicy") or {}
+
+    def as_list(value: Any) -> list[str] | None:
+        if isinstance(value, list):
+            return [str(v) for v in value] or None
+        if isinstance(value, str) and value:
+            return [value]
+        return None
+
+    return {
+        "version": 1,
+        "id": str(attrs.get("Id", "")),
+        "name": str(attrs.get("Name", "")).lstrip("/"),
+        "image": str(config.get("Image") or ""),
+        "image_id": str(attrs.get("Image") or ""),
+        "env": [str(e) for e in config.get("Env") or []],
+        "labels": {str(k): str(v) for k, v in (config.get("Labels") or {}).items()},
+        "cmd": as_list(config.get("Cmd")),
+        "entrypoint": as_list(config.get("Entrypoint")),
+        "working_dir": str(config.get("WorkingDir") or "") or None,
+        "user": str(config.get("User") or "") or None,
+        "port_bindings": {
+            str(port): [
+                {"HostIp": str(b.get("HostIp") or ""), "HostPort": str(b.get("HostPort") or "")}
+                for b in bindings or []
+            ]
+            for port, bindings in (host_config.get("PortBindings") or {}).items()
+        },
+        "mounts": [
+            {
+                "type": str(m.get("Type") or "bind"),
+                "name": str(m.get("Name") or ""),
+                "source": str(m.get("Source") or ""),
+                "target": str(m.get("Destination") or ""),
+                "read_only": not bool(m.get("RW", True)),
+            }
+            for m in attrs.get("Mounts") or []
+        ],
+        "restart_policy": {
+            "Name": str(restart.get("Name") or "no"),
+            "MaximumRetryCount": int(restart.get("MaximumRetryCount") or 0),
+        },
+        "networks": sorted(str(n) for n in (network_settings.get("Networks") or {})),
+    }
+
+
+def port_bindings_to_docker(raw: dict[str, Any]) -> dict[str, Any]:
+    """Convert raw ``HostConfig.PortBindings`` back to the ``docker-py`` ``ports`` mapping."""
+    result: dict[str, Any] = {}
+    for key, bindings in raw.items():
+        values: list[Any] = []
+        for binding in bindings or []:
+            host_port = str(binding.get("HostPort") or "")
+            host_ip = str(binding.get("HostIp") or "")
+            if not host_port:
+                value: Any = None
+            else:
+                port: Any = int(host_port) if host_port.isdigit() else host_port
+                value = (host_ip, port) if host_ip and host_ip not in ("0.0.0.0", "::") else port
+            if value not in values:
+                values.append(value)
+        if not values:
+            result[key] = None
+        elif len(values) == 1:
+            result[key] = values[0]
+        else:
+            result[key] = values
+    return result
+
+
 def detect_self_container_id() -> str | None:
     """Find the id of the container DriftWarden itself runs in, if any.
 
@@ -485,6 +571,135 @@ class DockerWatcher:
             return {}
         labels = (attrs.get("Config") or {}).get("Labels") or {}
         return {str(k): str(v) for k, v in labels.items()}
+
+    def container_spec(self, container_id: str) -> dict[str, Any] | None:
+        """Snapshot a container's configuration before a destructive action.
+
+        Returns:
+            The spec from :func:`spec_from_attrs`, or ``None`` if it no longer exists.
+
+        Raises:
+            DockerConnectionError: If the daemon cannot be reached.
+        """
+        try:
+            attrs = self.connect().api.inspect_container(container_id)
+        except NotFound:
+            return None
+        except DockerConnectionError:
+            raise
+        except DockerException as exc:
+            self._reset(str(exc))
+            raise DockerConnectionError(f"Docker inspect failed: {exc}") from exc
+        return spec_from_attrs(attrs)
+
+    def ensure_image(self, image: str) -> None:
+        """Make sure an image is present locally, pulling it if needed.
+
+        Raises:
+            ContainerRecreateError: If the image is gone and cannot be pulled.
+        """
+        client = self.connect()
+        try:
+            client.images.get(image)
+            return
+        except ImageNotFound:
+            pass
+        except DockerException as exc:
+            raise ContainerRecreateError(f"Cannot look up image {image}: {exc}") from exc
+        try:
+            logger.info("Pulling image {}", image)
+            client.images.pull(image)
+        except DockerException as exc:
+            raise ContainerRecreateError(
+                f"Image {image} is no longer available locally and could not be pulled "
+                f"({exc}); the container cannot be recreated"
+            ) from exc
+
+    def restore_container(self, spec: dict[str, Any], *, action_id: str) -> tuple[str, list[str]]:
+        """Recreate a container from a :func:`container_spec` snapshot.
+
+        Named and anonymous volumes are reattached by name, so their data comes
+        back when the volume still exists; the writable layer cannot be restored.
+
+        Returns:
+            The new container id and warnings about anything that could not be restored.
+
+        Raises:
+            ContainerRecreateError: If the name is taken, the image is unavailable or
+                the create/start call fails.
+        """
+        client = self.connect()
+        name = str(spec.get("name") or "")
+        image = str(spec.get("image") or spec.get("image_id") or "")
+        if not name or not image:
+            raise ContainerRecreateError("The snapshot has no container name or image")
+        try:
+            client.containers.get(name)
+            raise ContainerRecreateError(
+                f"A container named {name} already exists; remove it before reversing"
+            )
+        except NotFound:
+            pass
+        except ContainerRecreateError:
+            raise
+        except DockerException as exc:
+            raise ContainerRecreateError(f"Cannot check for container {name}: {exc}") from exc
+        self.ensure_image(image)
+
+        warnings: list[str] = []
+        volumes: dict[str, dict[str, str]] = {}
+        for mount in spec.get("mounts") or []:
+            kind = mount.get("type")
+            if kind == "bind":
+                source = str(mount.get("source") or "")
+            elif kind == "volume":
+                source = str(mount.get("name") or "")
+                try:
+                    client.volumes.get(source)
+                except NotFound:
+                    warnings.append(f"volume {source} no longer exists and is recreated empty")
+                except DockerException:
+                    pass
+            else:
+                continue
+            if source:
+                volumes[source] = {
+                    "bind": str(mount.get("target") or ""),
+                    "mode": "ro" if mount.get("read_only") else "rw",
+                }
+
+        networks: list[str] = []
+        for network in spec.get("networks") or []:
+            if network in ("bridge", "host", "none") or client.networks.list(names=[network]):
+                networks.append(str(network))
+            else:
+                warnings.append(f"network {network} no longer exists and was skipped")
+
+        labels = dict(spec.get("labels") or {})
+        labels[WARDEN_ACTION_LABEL] = action_id
+        try:
+            container = client.containers.create(
+                image,
+                name=name,
+                detach=True,
+                command=spec.get("cmd"),
+                entrypoint=spec.get("entrypoint"),
+                environment=spec.get("env") or None,
+                labels=labels,
+                ports=port_bindings_to_docker(spec.get("port_bindings") or {}) or None,
+                volumes=volumes or None,
+                restart_policy=spec.get("restart_policy") or {"Name": "no"},
+                working_dir=spec.get("working_dir"),
+                user=spec.get("user"),
+                network=networks[0] if networks else None,
+            )
+            for network in networks[1:]:
+                client.networks.get(network).connect(container)
+            container.start()
+        except DockerException as exc:
+            raise ContainerRecreateError(f"Cannot recreate {name}: {exc}") from exc
+        logger.info("Restored container {} from its snapshot", name)
+        return str(container.id), warnings
 
     # ------------------------------------------------------------ remediation
 

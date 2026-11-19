@@ -205,6 +205,13 @@ async def remove_whitelist(request: Request, entry_id: int) -> ActionResult:
     )
 
 
+@router.post("/audit/{entry_id}/reverse", response_model=ActionResult)
+async def reverse_audit_entry(request: Request, entry_id: int) -> ActionResult:
+    """Reverse an Enforce or Adopt action recorded in the audit log."""
+    logger.info("Reversal requested for audit entry {}", entry_id)
+    return await get_runtime(request).reconciler.reverse(entry_id)
+
+
 @router.get("/audit", response_model=list[AuditLogEntry])
 def audit(request: Request, limit: int = 200) -> list[AuditLogEntry]:
     """Most recent audit rows."""

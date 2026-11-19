@@ -244,6 +244,28 @@ class GitHubClient:
             raise AdoptionError(f"Cannot close PR #{number}: {exc}") from exc
         logger.info("Closed adoption PR #{}", number)
 
+    def delete_branch(self, branch: str) -> bool:
+        """Delete a DriftWarden branch (only ``warden/...`` branches are ever deleted).
+
+        Returns:
+            ``True`` if it was deleted, ``False`` if it was already gone.
+
+        Raises:
+            AdoptionError: For a non-warden branch or a GitHub failure.
+        """
+        if not branch.startswith("warden/"):
+            raise AdoptionError(f"Refusing to delete {branch}: not a DriftWarden branch")
+        try:
+            self._repo().get_git_ref(f"heads/{branch}").delete()
+        except GithubException as exc:
+            if exc.status in (404, 422):
+                return False
+            raise AdoptionError(f"Cannot delete branch {branch}: {_describe(exc)}") from exc
+        except Exception as exc:
+            raise AdoptionError(f"Cannot delete branch {branch}: {exc}") from exc
+        logger.info("Deleted branch {}", branch)
+        return True
+
     def find_open_adoption_pr(self, container_name: str) -> AdoptionPullRequest | None:
         """Find an open adoption pull request for a container, if one exists.
 

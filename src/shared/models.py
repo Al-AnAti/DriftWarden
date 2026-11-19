@@ -399,6 +399,12 @@ class AuditLogEntry(BaseModel):
         timestamp: UTC time at which the action occurred.
         details: Free-form context (diff summary, PR link, error text).
         hostname: Host on which the action happened.
+        reverses_id: For a reversal entry, the id of the entry it reverses.
+        reversed_by_id: The reversal entry that undid (or permanently refused to undo)
+            this action, if any.
+        reversible: Whether the Events Log may offer Reverse for this entry now.
+        not_reversible_reason: Why Reverse is unavailable, for the button tooltip.
+        reversal_warning: What a reversal cannot restore, shown in the confirmation.
     """
 
     model_config = ConfigDict(use_enum_values=False, extra="forbid")
@@ -409,6 +415,11 @@ class AuditLogEntry(BaseModel):
     timestamp: AwareDatetime
     details: str | None = None
     hostname: str | None = None
+    reverses_id: int | None = None
+    reversed_by_id: int | None = None
+    reversible: bool = False
+    not_reversible_reason: str | None = None
+    reversal_warning: str | None = None
 
 
 class ActionResult(BaseModel):

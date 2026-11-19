@@ -5,12 +5,15 @@ and FastAPI runs sync route handlers on its worker pool. Rows never leave this
 module as ORM objects: callers get the Pydantic contracts from ``shared``.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.orm import Session
 
-from shared.constants import AuditAction, DriftStatus, WhitelistTargetType
+from shared.constants import REVERSIBLE_ACTIONS, AuditAction, DriftStatus, WhitelistTargetType
 from shared.exceptions import DatabaseWriteError
 from shared.models import AuditLogEntry, PendingAdoption, WhitelistEntry
 from web.db.models_db import (
@@ -29,6 +32,17 @@ def _aware(value: datetime | None) -> datetime:
     if value is None:
         return datetime.now(timezone.utc)
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _load_snapshot(raw: str | None) -> dict[str, Any] | None:
+    """Decode a stored audit snapshot; unreadable JSON counts as no snapshot."""
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _pending_from_row(row: PendingAdoptionRow) -> PendingAdoption:
@@ -61,13 +75,23 @@ class Store:
 
     # ---------------------------------------------------------------- audit
 
-    def record_audit(self, action: AuditAction, target: str, details: str | None = None) -> int:
+    def record_audit(
+        self,
+        action: AuditAction,
+        target: str,
+        details: str | None = None,
+        *,
+        snapshot: dict[str, Any] | None = None,
+        reverses_id: int | None = None,
+    ) -> int:
         """Append an audit row.
 
         Args:
             action: What happened.
             target: Container, service or resource affected.
             details: Optional free text.
+            snapshot: Pre-action state needed to reverse it later (stored as JSON).
+            reverses_id: For a reversal, the id of the entry it reverses.
 
         Returns:
             The new row id.
@@ -83,6 +107,8 @@ class Store:
                     details=details,
                     hostname=self._hostname,
                     timestamp=datetime.now(timezone.utc),
+                    snapshot=json.dumps(snapshot, default=str) if snapshot is not None else None,
+                    reverses_id=reverses_id,
                 )
                 session.add(row)
                 session.flush()
@@ -92,23 +118,114 @@ class Store:
         logger.info("AUDIT {} target={} {}", action.value, target, details or "")
         return row_id
 
+    def _reversal_index(self, session: Session) -> dict[int, list[tuple[int, str]]]:
+        """Reversal rows grouped by the entry they reverse: ``{original: [(id, action)]}``."""
+        index: dict[int, list[tuple[int, str]]] = {}
+        rows = session.execute(
+            select(AuditLogRow.id, AuditLogRow.action, AuditLogRow.reverses_id)
+            .where(AuditLogRow.reverses_id.is_not(None))
+            .order_by(AuditLogRow.id.asc())
+        ).all()
+        for row_id, action, reverses_id in rows:
+            if reverses_id is None:
+                continue
+            index.setdefault(int(reverses_id), []).append((int(row_id), str(action)))
+        return index
+
+    @staticmethod
+    def _entry(row: AuditLogRow, reversals: list[tuple[int, str]]) -> AuditLogEntry:
+        action = AuditAction(row.action)
+        final = [
+            rid
+            for rid, ract in reversals
+            if ract in (AuditAction.REVERSAL_COMPLETED.value, AuditAction.REVERSAL_REFUSED.value)
+        ]
+        reversed_by = final[-1] if final else None
+        refused = any(ract == AuditAction.REVERSAL_REFUSED.value for _, ract in reversals)
+        reason: str | None = None
+        warning: str | None = None
+        if action not in REVERSIBLE_ACTIONS:
+            reason = "This kind of action cannot be reversed"
+        elif reversed_by is not None:
+            reason = (
+                f"Can no longer be reversed (see #{reversed_by})"
+                if refused
+                else f"Already reversed by #{reversed_by}"
+            )
+        elif not row.snapshot:
+            reason = "Recorded before reversal support; no snapshot to restore from"
+        if action is AuditAction.ENFORCE_KILL:
+            warning = (
+                "The container is recreated from its recorded configuration and reattached "
+                "to its volumes; changes made inside its filesystem outside volumes are lost."
+            )
+        elif action is AuditAction.REVERT_COMPLETED:
+            warning = (
+                "The container Enforce created is removed and the previous container is "
+                "recreated from its recorded configuration; filesystem changes outside "
+                "volumes are not restored."
+            )
+        elif action is AuditAction.ADOPT_PR_OPENED:
+            warning = (
+                "The pull request is closed and its branch deleted; every workload buffered "
+                "on the same pull request returns to its live drift state. A merged pull "
+                "request cannot be reversed here."
+            )
+        return AuditLogEntry(
+            id=row.id,
+            action=action,
+            target=row.target,
+            timestamp=_aware(row.timestamp),
+            details=row.details,
+            hostname=row.hostname,
+            reverses_id=row.reverses_id,
+            reversed_by_id=reversed_by,
+            reversible=reason is None,
+            not_reversible_reason=reason,
+            reversal_warning=warning if reason is None else None,
+        )
+
     def list_audit(self, limit: int = 200) -> list[AuditLogEntry]:
-        """Most recent audit rows, newest first."""
+        """Most recent audit rows, newest first, with their reversal state."""
         with self._db.session() as session:
             rows = session.scalars(
                 select(AuditLogRow).order_by(AuditLogRow.id.desc()).limit(limit)
             ).all()
-        return [
-            AuditLogEntry(
-                id=row.id,
-                action=AuditAction(row.action),
-                target=row.target,
-                timestamp=_aware(row.timestamp),
-                details=row.details,
-                hostname=row.hostname,
-            )
-            for row in rows
-        ]
+            index = self._reversal_index(session)
+        return [self._entry(row, index.get(row.id, [])) for row in rows]
+
+    def get_audit(self, entry_id: int) -> tuple[AuditLogEntry, dict[str, Any] | None] | None:
+        """One audit entry with its reversal state and its snapshot (if any)."""
+        with self._db.session() as session:
+            row = session.get(AuditLogRow, entry_id)
+            if row is None:
+                return None
+            index = self._reversal_index(session)
+            entry = self._entry(row, index.get(row.id, []))
+            snapshot = _load_snapshot(row.snapshot)
+        return entry, snapshot
+
+    def adoption_entries_for_pr(self, pr_number: int) -> list[AuditLogEntry]:
+        """Unreversed ``adopt_pr_opened`` entries whose snapshot points at this PR."""
+        with self._db.session() as session:
+            rows = session.scalars(
+                select(AuditLogRow)
+                .where(
+                    AuditLogRow.action == AuditAction.ADOPT_PR_OPENED.value,
+                    AuditLogRow.snapshot.is_not(None),
+                )
+                .order_by(AuditLogRow.id.asc())
+            ).all()
+            index = self._reversal_index(session)
+            entries: list[AuditLogEntry] = []
+            for row in rows:
+                snapshot = _load_snapshot(row.snapshot)
+                if not snapshot or snapshot.get("pr_number") != pr_number:
+                    continue
+                entry = self._entry(row, index.get(row.id, []))
+                if entry.reversed_by_id is None:
+                    entries.append(entry)
+        return entries
 
     # --------------------------------------------------------------- buffer
 

@@ -31,6 +31,10 @@ class AuditLogRow(Base):
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    # Pre-action state needed to reverse it (JSON); never returned by the API or UI.
+    snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # For a reversal entry: the audit entry it reverses. Original rows are never edited.
+    reverses_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 
 class PendingAdoptionRow(Base):

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from shared.constants import DriftStatus
+from shared.constants import REVERSIBLE_ACTIONS, DriftStatus
 from shared.models import DriftRecord
 from warden.engine.state_projector import snapshot_payload
 from web.runtime import WardenRuntime, get_runtime
@@ -149,6 +149,7 @@ def events_page(request: Request) -> HTMLResponse:
     runtime = get_runtime(request)
     context = base_context(request, runtime, "events")
     context["audit"] = runtime.store.list_audit(limit=200)
+    context["reversible_actions"] = sorted(a.value for a in REVERSIBLE_ACTIONS)
     context["events"] = runtime.store.list_drift_events(limit=200)
     return templates.TemplateResponse(request, "events.html", context)
 

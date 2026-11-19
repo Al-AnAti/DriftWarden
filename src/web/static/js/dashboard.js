@@ -777,6 +777,33 @@
         }
     };
 
+    /* Events Log: undo an Enforce or Adopt recorded in the audit log. */
+    window.wardenReverse = async function (id, action, target, warning) {
+        const what = action === "adopt_pr_opened"
+            ? "close the adoption pull request, delete its branch and return the workload(s) to their live drift state"
+            : action === "enforce_kill"
+                ? "recreate the container Enforce removed"
+                : "remove the container Enforce created and bring back the one it replaced";
+        const values = await wardenModal({
+            title: "Reverse audit entry #" + id,
+            message: "Reverse " + action + " on '" + target + "'? This will " + what + "." + (warning ? "\n\n" + warning : "") + "\n\nThe reversal is recorded as its own audit entry.",
+            confirmText: "Reverse",
+            danger: true,
+        });
+        if (values === null) return;
+        toast("Reversing #" + id + "…", "sky");
+        try {
+            const result = await post("/api/audit/" + id + "/reverse");
+            flash(result.message, "emerald");
+            window.location.reload();
+        } catch (err) {
+            if (err.name === "AbortError") return;
+            toast("Reverse failed: " + err.message, "rose");
+            showActionError(err.message);
+            setTimeout(() => window.location.reload(), 2500);
+        }
+    };
+
     window.wardenReconcile = async function () {
         toast("Reconciling…", "sky");
         try {

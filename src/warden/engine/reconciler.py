@@ -15,11 +15,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from pydantic import ValidationError
 
 from shared.constants import (
+    REVERSIBLE_ACTIONS,
     WARDEN_ACTION_LABEL,
     AuditAction,
     BaselineSource,
@@ -39,6 +41,7 @@ from shared.exceptions import (
 )
 from shared.models import (
     ActionResult,
+    AuditLogEntry,
     BaselineInfo,
     BatchRequest,
     BatchResult,
@@ -786,6 +789,7 @@ class Reconciler:
             service.container_name or f"{self.baseline.project_name}-{service.service_name}-1"
         )
         self._remember_action(record.container_id, record.container_name, target_name, action_id)
+        previous = await self._capture_spec(record.container_id)
         try:
             if record.container_id and record.container_name != target_name:
                 await asyncio.to_thread(self.watcher.stop_and_remove, record.container_id)
@@ -828,6 +832,13 @@ class Reconciler:
             record.ref,
             f"{'autonomous' if autonomous else 'manual'} recreate of {service.service_name} "
             f"as {target_name} ({new_id[:12]})",
+            snapshot={
+                "type": "enforce_recreate",
+                "service_name": service.service_name,
+                "created_container_id": new_id,
+                "created_name": target_name,
+                "previous": previous,
+            },
         )
         if not autonomous:
             self.schedule_reconcile("revert")
@@ -852,6 +863,7 @@ class Reconciler:
         if not record.container_id:
             raise DriftWardenError(f"'{record.ref}' has no container to remove")
         self._remember_action(record.container_id, record.container_name)
+        previous = await self._capture_spec(record.container_id)
         try:
             await asyncio.to_thread(self.watcher.stop_and_remove, record.container_id)
         except (RogueContainerKillError, DockerConnectionError) as exc:
@@ -875,6 +887,7 @@ class Reconciler:
             record.ref,
             f"{'autonomous' if autonomous else 'manual'} removal of {record.container_name} "
             f"({record.image})",
+            snapshot={"type": "enforce_remove", "previous": previous} if previous else None,
         )
         if not autonomous:
             self.schedule_reconcile("kill")
@@ -953,6 +966,7 @@ class Reconciler:
             AuditAction.ADOPT_PR_OPENED,
             record.ref,
             f"PR #{pull.number} {pull.url}{' (reused open PR)' if pull.reused else ''}",
+            snapshot=_adopt_snapshot(pull, container.id, final_name, "adopt", batch=False),
         )
         self.schedule_reconcile("adopt")
         verb = "Reusing open" if pull.reused else "Opened"
@@ -1097,6 +1111,7 @@ class Reconciler:
                 AuditAction.ADOPT_PR_OPENED,
                 plan.record.ref,
                 f"batch PR #{pull.number} {pull.url}",
+                snapshot=_adopt_snapshot(pull, plan.container.id, service, "adopt", batch=True),
             )
             results.append(
                 ActionResult(
@@ -1130,6 +1145,7 @@ class Reconciler:
                 AuditAction.ADOPT_PR_OPENED,
                 record.ref,
                 f"batch deletion PR #{pull.number} {pull.url}",
+                snapshot=_adopt_snapshot(pull, key, service, "remove", batch=True),
             )
             results.append(
                 ActionResult(
@@ -1210,6 +1226,7 @@ class Reconciler:
             AuditAction.ADOPT_PR_OPENED,
             record.ref,
             f"deletion PR #{pull.number} {pull.url}{' (reused open PR)' if pull.reused else ''}",
+            snapshot=_adopt_snapshot(pull, buffer_key, service_name, "remove", batch=False),
         )
         self.schedule_reconcile("adopt-deletion")
         verb = "Reusing open" if pull.reused else "Opened"
@@ -1281,6 +1298,220 @@ class Reconciler:
                 "re-evaluating against the baseline."
             ),
             pr_url=pending.pr_url,
+        )
+
+    # ------------------------------------------------------------- reversal
+
+    async def _capture_spec(self, container_id: str | None) -> dict[str, Any] | None:
+        """Snapshot a container before Enforce touches it; failures only cost reversibility."""
+        if not container_id:
+            return None
+        try:
+            return await asyncio.to_thread(self.watcher.container_spec, container_id)
+        except Exception as exc:
+            logger.warning("Could not snapshot {} for reversal: {}", container_id[:12], exc)
+            return None
+
+    async def _record_reversal(
+        self, entry: AuditLogEntry, action: AuditAction, details: str
+    ) -> int:
+        """Append an immutable reversal entry linked to the original audit entry."""
+        return await asyncio.to_thread(
+            self.store.record_audit,
+            action,
+            entry.target,
+            f"reverses #{entry.id} ({entry.action.value}): {details}",
+            reverses_id=entry.id,
+        )
+
+    async def reverse(self, entry_id: int) -> ActionResult:
+        """Undo an Enforce or Adopt action recorded in the audit log.
+
+        Raises:
+            DriftWardenError: If the entry does not exist, cannot be reversed, was
+                already reversed, or the reversal itself fails (which is also audited).
+        """
+        found = await asyncio.to_thread(self.store.get_audit, entry_id)
+        if found is None:
+            raise DriftWardenError(f"No audit entry with id {entry_id}")
+        entry, snapshot = found
+        if entry.action not in REVERSIBLE_ACTIONS:
+            raise DriftWardenError(f"{entry.action.value} entries cannot be reversed")
+        if entry.reversed_by_id is not None:
+            raise DriftWardenError(
+                f"Audit entry #{entry_id} cannot be reversed again (see #{entry.reversed_by_id})"
+            )
+        if not snapshot:
+            raise DriftWardenError(
+                f"Audit entry #{entry_id} was recorded before reversal support and has no "
+                "snapshot to restore from"
+            )
+        if entry.action is AuditAction.ADOPT_PR_OPENED:
+            return await self._reverse_adoption(entry, snapshot)
+        if self.settings.enforce:
+            raise DriftWardenError(
+                "Switch WARDEN_MODE to observe before reversing an Enforce: enforce mode "
+                "would immediately apply it again"
+            )
+        if entry.action is AuditAction.REVERT_COMPLETED:
+            return await self._reverse_recreate(entry, snapshot)
+        return await self._reverse_removal(entry, snapshot)
+
+    async def _restore(self, spec: dict[str, Any], action_id: str) -> tuple[str, list[str]]:
+        self._remember_action(str(spec.get("name") or ""), action_id)
+        new_id, warnings = await asyncio.to_thread(
+            self.watcher.restore_container, spec, action_id=action_id
+        )
+        self._remember_action(new_id)
+        return new_id, warnings
+
+    async def _reverse_recreate(
+        self, entry: AuditLogEntry, snapshot: dict[str, Any]
+    ) -> ActionResult:
+        """Remove the container Enforce created and bring back the one it replaced."""
+        action_id = uuid.uuid4().hex[:12]
+        created = snapshot.get("created_container_id")
+        previous = snapshot.get("previous")
+        steps: list[str] = []
+        warnings: list[str] = []
+        try:
+            if previous:
+                # Fail before removing anything if the old image cannot come back.
+                image = str(previous.get("image") or previous.get("image_id") or "")
+                await asyncio.to_thread(self.watcher.ensure_image, image)
+            if created:
+                self._remember_action(str(created), snapshot.get("created_name"), action_id)
+                if await asyncio.to_thread(self.watcher.inspect, str(created)) is not None:
+                    await asyncio.to_thread(self.watcher.stop_and_remove, str(created))
+                    steps.append(f"removed the container Enforce created ({str(created)[:12]})")
+                else:
+                    steps.append("the container Enforce created was already gone")
+            if previous:
+                new_id, warnings = await self._restore(previous, action_id)
+                steps.append(
+                    f"restored {previous.get('name')} ({previous.get('image')}) as {new_id[:12]}"
+                )
+            else:
+                steps.append("nothing ran before Enforce, so nothing was restored")
+        except (ContainerRecreateError, RogueContainerKillError, DockerConnectionError) as exc:
+            done = "; ".join(steps)
+            await self._record_reversal(
+                entry, AuditAction.REVERSAL_FAILED, f"{done + '; ' if done else ''}failed: {exc}"
+            )
+            raise DriftWardenError(f"Reversal of #{entry.id} failed: {exc}") from exc
+        return await self._reversal_done(entry, steps, warnings)
+
+    async def _reverse_removal(
+        self, entry: AuditLogEntry, snapshot: dict[str, Any]
+    ) -> ActionResult:
+        """Recreate a container Enforce removed, from its recorded configuration."""
+        previous = snapshot.get("previous")
+        if not previous:
+            raise DriftWardenError(
+                f"Audit entry #{entry.id} has no recorded container configuration"
+            )
+        try:
+            new_id, warnings = await self._restore(previous, uuid.uuid4().hex[:12])
+        except (ContainerRecreateError, DockerConnectionError) as exc:
+            await self._record_reversal(entry, AuditAction.REVERSAL_FAILED, f"failed: {exc}")
+            raise DriftWardenError(f"Reversal of #{entry.id} failed: {exc}") from exc
+        warnings.append("changes made inside the container's filesystem outside volumes are lost")
+        steps = [f"recreated {previous.get('name')} ({previous.get('image')}) as {new_id[:12]}"]
+        return await self._reversal_done(entry, steps, warnings)
+
+    async def _reversal_done(
+        self, entry: AuditLogEntry, steps: list[str], warnings: list[str]
+    ) -> ActionResult:
+        text = "; ".join(steps)
+        if warnings:
+            text += ". Not restored: " + "; ".join(warnings)
+        reversal_id = await self._record_reversal(entry, AuditAction.REVERSAL_COMPLETED, text)
+        self.schedule_reconcile("reverse")
+        return ActionResult(
+            ok=True,
+            action="reverse",
+            target=entry.target,
+            message=f"Reversed #{entry.id} (audit #{reversal_id}): {text}.",
+        )
+
+    async def _reverse_adoption(
+        self, entry: AuditLogEntry, snapshot: dict[str, Any]
+    ) -> ActionResult:
+        """Close the adoption PR, delete its branch and drop its buffer entries."""
+        github = self.github
+        if github is None or self.settings.allow_mock_baseline:
+            raise DriftWardenError("Reversing an adoption needs GitHub; ALLOW_MOCK_BASELINE is on")
+        pr_number = snapshot.get("pr_number")
+        if not isinstance(pr_number, int):
+            raise DriftWardenError(f"Audit entry #{entry.id} has no pull request recorded")
+        siblings = await asyncio.to_thread(self.store.adoption_entries_for_pr, pr_number)
+        if all(s.id != entry.id for s in siblings):
+            siblings.append(entry)
+        try:
+            state = await asyncio.to_thread(github.pull_state, pr_number)
+        except GitBaselineFetchError as exc:
+            await self._record_reversal(
+                entry, AuditAction.REVERSAL_FAILED, f"cannot read PR #{pr_number}: {exc}"
+            )
+            raise DriftWardenError(f"Cannot read PR #{pr_number}: {exc}") from exc
+        if state == "merged":
+            reason = (
+                f"PR #{pr_number} is already merged into the baseline; undo it with a revert "
+                "commit in Git"
+            )
+            for sibling in siblings:
+                await self._record_reversal(sibling, AuditAction.REVERSAL_REFUSED, reason)
+            raise DriftWardenError(reason)
+
+        steps: list[str] = []
+        if state == "open":
+            comment = (
+                f"Adoption reversed by operator via DriftWarden (audit #{entry.id})"
+                + (f"; covers {len(siblings)} workloads" if len(siblings) > 1 else "")
+                + "."
+            )
+            try:
+                await asyncio.to_thread(github.close_pull, pr_number, comment)
+            except AdoptionError as exc:
+                await self._record_reversal(entry, AuditAction.REVERSAL_FAILED, str(exc))
+                raise DriftWardenError(f"Cannot close PR #{pr_number}: {exc}") from exc
+            steps.append(f"closed PR #{pr_number}")
+        else:
+            steps.append(f"PR #{pr_number} was already closed")
+        branch = snapshot.get("branch")
+        if isinstance(branch, str) and branch.startswith("warden/"):
+            try:
+                deleted = await asyncio.to_thread(github.delete_branch, branch)
+                steps.append(
+                    f"deleted branch {branch}" if deleted else f"branch {branch} was already gone"
+                )
+            except AdoptionError as exc:
+                steps.append(f"could not delete branch {branch} ({exc})")
+        evicted = [p for p in self._pending.values() if p.pr_number == pr_number]
+        for pending in evicted:
+            await asyncio.to_thread(self.store.clear_pending, pending.id, "reversed")
+            self._pending.pop(pending.container_id, None)
+            self._pr_unreachable_since.pop(pending.id, None)
+        plural = "y" if len(evicted) == 1 else "ies"
+        steps.append(f"evicted {len(evicted)} buffer entr{plural}")
+        text = "; ".join(steps)
+        ids = [
+            await self._record_reversal(sibling, AuditAction.REVERSAL_COMPLETED, text)
+            for sibling in siblings
+        ]
+        self.schedule_reconcile("reverse")
+        others = len(siblings) - 1
+        covered = (
+            f" and {others} other entr{'y' if others == 1 else 'ies'} on the same PR"
+            if others
+            else ""
+        )
+        return ActionResult(
+            ok=True,
+            action="reverse",
+            target=entry.target,
+            message=f"Reversed #{entry.id}{covered} (audit #{ids[0]}): {text}.",
+            pr_url=snapshot.get("pr_url") if isinstance(snapshot.get("pr_url"), str) else None,
         )
 
     async def batch(self, request: BatchRequest) -> BatchResult:
@@ -1433,6 +1664,22 @@ class Reconciler:
     def pending(self) -> list[PendingAdoption]:
         """Active adoption buffer entries."""
         return list(self._pending.values())
+
+
+def _adopt_snapshot(
+    pull: AdoptionPullRequest, container_id: str, service: str, kind: str, *, batch: bool
+) -> dict[str, Any]:
+    """What reversing an adoption needs: the PR, its branch and the buffered entry."""
+    return {
+        "type": "adopt",
+        "kind": kind,
+        "pr_number": pull.number,
+        "pr_url": pull.url,
+        "branch": pull.branch,
+        "container_id": container_id,
+        "service_name": service,
+        "batch": batch,
+    }
 
 
 def _batch_pr_body(

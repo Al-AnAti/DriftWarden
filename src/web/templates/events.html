@@ -43,19 +43,27 @@
         </header>
         <table class="min-w-full text-sm">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-6 py-2">When (UTC)</th><th class="text-left px-6 py-2">Action</th><th class="text-left px-6 py-2">Target</th><th class="text-left px-6 py-2">Host</th><th class="text-left px-6 py-2">Details</th></tr>
+                <tr><th class="text-left px-6 py-2">#</th><th class="text-left px-6 py-2">When (UTC)</th><th class="text-left px-6 py-2">Action</th><th class="text-left px-6 py-2">Target</th><th class="text-left px-6 py-2">Host</th><th class="text-left px-6 py-2">Details</th><th class="text-right px-6 py-2"></th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
                 {% for a in audit %}
-                <tr>
+                <tr id="audit-{{ a.id }}">
+                    <td class="px-6 py-2 font-mono text-xs text-slate-500">{{ a.id }}</td>
                     <td class="px-6 py-2 font-mono text-xs text-slate-400 whitespace-nowrap">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-6 py-2 font-mono text-xs {% if 'failed' in a.action.value %}text-rose-300{% elif 'detected' in a.action.value %}text-amber-300{% elif a.action.value in ('revert_completed', 'adopt_pr_opened', 'state_restored') %}text-emerald-300{% else %}text-slate-300{% endif %}">{{ a.action.value }}</td>
+                    <td class="px-6 py-2 font-mono text-xs {% if 'failed' in a.action.value or a.action.value == 'reversal_refused' %}text-rose-300{% elif 'detected' in a.action.value %}text-amber-300{% elif a.action.value in ('revert_completed', 'adopt_pr_opened', 'state_restored', 'reversal_completed') %}text-emerald-300{% else %}text-slate-300{% endif %}">{{ a.action.value }}{% if a.reverses_id %} <a class="text-indigo-300 hover:underline" href="#audit-{{ a.reverses_id }}">&rarr; #{{ a.reverses_id }}</a>{% endif %}</td>
                     <td class="px-6 py-2 font-mono text-xs">{{ a.target }}</td>
                     <td class="px-6 py-2 font-mono text-xs text-slate-500">{{ a.hostname or '' }}</td>
                     <td class="px-6 py-2 text-xs text-slate-400 break-all">{{ a.details or '' }}</td>
+                    <td class="px-6 py-2 text-right whitespace-nowrap">
+                        {% if a.action.value in reversible_actions %}
+                        <button type="button" class="btn btn-ghost disabled:opacity-40 disabled:cursor-not-allowed"
+                            {% if a.reversible %}onclick='wardenReverse({{ a.id }}, {{ a.action.value | tojson }}, {{ a.target | tojson }}, {{ (a.reversal_warning or "") | tojson }})' title="Undo this action"{% else %}disabled title="{{ a.not_reversible_reason }}"{% endif %}>&#8630; Reverse</button>
+                        {% if a.reversed_by_id %}<a class="block text-[11px] text-slate-500 hover:underline" href="#audit-{{ a.reversed_by_id }}">see #{{ a.reversed_by_id }}</a>{% endif %}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No audit rows yet.</td></tr>
+                <tr><td colspan="7" class="px-6 py-8 text-center text-slate-500">No audit rows yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

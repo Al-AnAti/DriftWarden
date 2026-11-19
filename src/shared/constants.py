@@ -134,6 +134,15 @@ class AuditAction(str, Enum):
     ENGINE_STARTED = "engine_started"
     """The reconciliation engine finished its startup pass."""
 
+    REVERSAL_COMPLETED = "reversal_completed"
+    """An operator reversed an earlier action from the audit log."""
+
+    REVERSAL_FAILED = "reversal_failed"
+    """Reversing an earlier action failed; it can be retried."""
+
+    REVERSAL_REFUSED = "reversal_refused"
+    """An earlier action can no longer be reversed (for example its PR was merged)."""
+
     ADOPTION_INVALIDATED = "adoption_invalidated"
     """The container instance an adoption was bound to no longer exists."""
 
@@ -145,6 +154,12 @@ class AuditAction(str, Enum):
 
     BATCH_REQUESTED = "batch_requested"
     """An operator ran Enforce All or Adopt All over a scope of workloads."""
+
+
+REVERSIBLE_ACTIONS: frozenset[AuditAction] = frozenset(
+    {AuditAction.REVERT_COMPLETED, AuditAction.ENFORCE_KILL, AuditAction.ADOPT_PR_OPENED}
+)
+"""Audit actions that can be undone from the Events Log when they carry a snapshot."""
 
 
 class WhitelistTargetType(str, Enum):

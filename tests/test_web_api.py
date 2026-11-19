@@ -280,3 +280,20 @@ def test_batch_buttons_disabled_when_only_matched(
             tag = page.split(f'id="{button_id}"')[1].split(">")[0]
             assert 'disabled title="No active drift to reconcile"' in tag
         assert "updateBatchButtons" in test_client.get("/static/js/dashboard.js").text
+
+
+def test_reverse_endpoint_and_events_button(client: TestClient) -> None:
+    response = client.post("/api/actions/kill/rogue-db")
+    assert response.status_code == 200
+    audit = client.get("/api/audit").json()
+    kill = next(a for a in audit if a["action"] == "enforce_kill")
+    assert kill["reversible"] and kill["reversal_warning"] and "snapshot" not in kill
+    page = client.get("/events").text
+    assert f'onclick=\'wardenReverse({kill["id"]}, "enforce_kill"' in page
+    response = client.post(f"/api/audit/{kill['id']}/reverse")
+    assert response.status_code == 200 and response.json()["action"] == "reverse"
+    again = client.post(f"/api/audit/{kill['id']}/reverse")
+    assert again.status_code == 409 and "cannot be reversed again" in again.json()["message"]
+    assert client.post("/api/audit/999999/reverse").status_code == 409
+    page = client.get("/events").text
+    assert "Already reversed by #" in page and "reversal_completed" in page

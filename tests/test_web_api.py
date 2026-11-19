@@ -250,3 +250,33 @@ def test_unexpected_errors_reach_the_ui_as_json(
     body = response.json()
     assert body["ok"] is False and "socket write refused" in body["message"]
     assert 'id="banner-action"' in client.get("/").text
+
+
+def test_batch_buttons_disable_without_actionable_drift(
+    client: TestClient, fake_watcher: FakeWatcher, web_container: LiveContainer
+) -> None:
+    def tag(page: str, button_id: str) -> str:
+        return page.split(f'id="{button_id}"')[1].split(">")[0]
+
+    page = client.get("/").text
+    assert "No active drift" not in tag(page, "btn-enforce-all")
+    assert "No active drift" not in tag(page, "btn-adopt-all")
+    fake_watcher.containers = [web_container]  # cache MISSING still counts as drift
+    client.post("/api/reconcile")
+    assert "No active drift" not in tag(client.get("/").text, "btn-enforce-all")
+
+
+def test_batch_buttons_disabled_when_only_matched(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_watcher: FakeWatcher,
+    web_container: LiveContainer,
+    cache_container: LiveContainer,
+) -> None:
+    fake_watcher.containers = [web_container, cache_container]
+    monkeypatch.setattr(web_app, "DockerWatcher", lambda settings: fake_watcher)
+    with TestClient(web_app.app, raise_server_exceptions=False) as test_client:
+        page = test_client.get("/").text
+        for button_id in ("btn-enforce-all", "btn-adopt-all"):
+            tag = page.split(f'id="{button_id}"')[1].split(">")[0]
+            assert 'disabled title="No active drift to reconcile"' in tag
+        assert "updateBatchButtons" in test_client.get("/static/js/dashboard.js").text

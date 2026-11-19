@@ -309,6 +309,21 @@
         );
     }
 
+    /* Enforce All needs something to enforce; Adopt All something Git does not yet have. */
+    function updateBatchButtons(snapshot) {
+        const c = snapshot.counts || {};
+        const enforceOpen = (c.rogue || 0) + (c.drifted || 0) + (c.missing || 0) + (c.awaiting_restart || 0);
+        const adoptOpen = (c.rogue || 0) + (c.drifted || 0) + (c.missing || 0);
+        const set = (id, open, activeTitle) => {
+            const button = document.getElementById(id);
+            if (!button) return;
+            button.disabled = !open;
+            button.title = open ? activeTitle : "No active drift to reconcile";
+        };
+        set("btn-enforce-all", enforceOpen > 0, "Enforce every drifted, missing, rogue or awaiting-restart workload");
+        set("btn-adopt-all", adoptOpen > 0, "Adopt every drifted, missing or rogue workload in one pull request");
+    }
+
     const ORDER = ["rogue", "drifted", "missing", "awaiting_restart", "pending_adoption", "matched"];
 
     function renderDashboard(snapshot) {
@@ -335,6 +350,7 @@
             enf.textContent = snapshot.mode === "enforce" ? (snapshot.enforcement_active ? "Armed" : "Grace window") : "Manual only";
             enf.className = "text-xl font-semibold mt-1 " + (snapshot.enforcement_active ? "text-rose-400" : "text-slate-300");
         }
+        updateBatchButtons(snapshot);
         setText("exempt-note", snapshot.exempt.length + " exempt");
         const exempt = document.getElementById("exempt-list");
         if (exempt) exempt.innerHTML = snapshot.exempt.map((e) => "<li>" + esc(e) + "</li>").join("");
@@ -593,6 +609,8 @@
     }
 
     window.wardenBatch = async function (operation) {
+        const button = document.getElementById(operation === "enforce" ? "btn-enforce-all" : "btn-adopt-all");
+        if (button && button.disabled) return;
         const isEnforce = operation === "enforce";
         const values = await wardenModal({
             title: isEnforce ? "Enforce All" : "Adopt All",

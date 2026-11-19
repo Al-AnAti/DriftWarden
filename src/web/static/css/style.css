@@ -174,3 +174,7 @@
 .modal-list { max-height: 11rem; overflow: auto; border: 1px solid #334155; border-radius: 0.5rem; background: #0b1120; padding: 0.5rem 0.75rem; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.75rem; }
 .impact { border-left: 3px solid #818cf8; background: rgba(30, 41, 59, 0.7); border-radius: 0.4rem; padding: 0.6rem 0.8rem; font-size: 0.8rem; }
 .impact code { color: #c7d2fe; }
+
+/* Disabled action buttons (batch buttons without drift, non-reversible audit rows). */
+.btn:disabled, .btn-lg:disabled { opacity: 0.4; cursor: not-allowed; filter: saturate(0.4); transform: none; }
+.btn-lg:disabled:hover { filter: saturate(0.4); transform: none; }

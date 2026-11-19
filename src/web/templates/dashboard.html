@@ -21,8 +21,12 @@
             </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-            <button onclick="wardenBatch('enforce')" class="btn-lg btn-rose text-sm">[ Enforce All ]</button>
-            <button onclick="wardenBatch('adopt')" class="btn-lg btn-emerald text-sm">[ Adopt All ]</button>
+            {% set enforce_open = counts['rogue'] + counts['drifted'] + counts['missing'] + counts['awaiting_restart'] %}
+            {% set adopt_open = counts['rogue'] + counts['drifted'] + counts['missing'] %}
+            <button id="btn-enforce-all" onclick="wardenBatch('enforce')" class="btn-lg btn-rose text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                {% if not enforce_open %}disabled title="No active drift to reconcile"{% else %}title="Enforce every drifted, missing, rogue or awaiting-restart workload"{% endif %}>[ Enforce All ]</button>
+            <button id="btn-adopt-all" onclick="wardenBatch('adopt')" class="btn-lg btn-emerald text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                {% if not adopt_open %}disabled title="No active drift to reconcile"{% else %}title="Adopt every drifted, missing or rogue workload in one pull request"{% endif %}>[ Adopt All ]</button>
             <button onclick="wardenReconcile()" class="btn-lg btn-ghost text-sm">🔄 Refresh</button>
         </div>
     </div>

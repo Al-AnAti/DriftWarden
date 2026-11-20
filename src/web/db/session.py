@@ -16,6 +16,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from web.db.models_db import Base
 
+EVENT_COLUMNS: dict[str, str] = {
+    "severity": "VARCHAR(16)",
+    "result": "VARCHAR(16)",
+    "correlation_id": "VARCHAR(32)",
+    "details_json": "TEXT",
+}
+"""Columns added to both ``audit_log`` and ``drift_events``; legacy rows stay ``NULL``."""
+
 
 class Database:
     """Owns the SQLAlchemy engine and hands out sessions.
@@ -60,18 +68,36 @@ class Database:
                     logger.info("Migrated pending_adoptions: added {} column", column)
             rows = connection.exec_driver_sql("PRAGMA table_info(audit_log)").fetchall()
             audit_columns = {str(row[1]) for row in rows}
-            for column, ddl in {"snapshot": "TEXT", "reverses_id": "INTEGER"}.items():
+            for column, ddl in {
+                "snapshot": "TEXT",
+                "reverses_id": "INTEGER",
+                **EVENT_COLUMNS,
+            }.items():
                 if audit_columns and column not in audit_columns:
                     connection.exec_driver_sql(f"ALTER TABLE audit_log ADD COLUMN {column} {ddl}")
                     logger.info("Migrated audit_log: added {} column", column)
+            if audit_columns:
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_audit_log_correlation_id "
+                    "ON audit_log (correlation_id)"
+                )
             rows = connection.exec_driver_sql("PRAGMA table_info(drift_events)").fetchall()
             event_columns = {str(row[1]) for row in rows}
-            for column, ddl in {"trigger": "VARCHAR(64)", "reason": "TEXT"}.items():
+            for column, ddl in {
+                "trigger": "VARCHAR(64)",
+                "reason": "TEXT",
+                **EVENT_COLUMNS,
+            }.items():
                 if event_columns and column not in event_columns:
                     connection.exec_driver_sql(
                         f"ALTER TABLE drift_events ADD COLUMN {column} {ddl}"
                     )
                     logger.info("Migrated drift_events: added {} column", column)
+            if event_columns:
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_drift_events_correlation_id "
+                    "ON drift_events (correlation_id)"
+                )
 
     @contextmanager
     def session(self) -> Iterator[Session]:

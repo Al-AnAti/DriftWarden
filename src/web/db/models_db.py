@@ -35,6 +35,14 @@ class AuditLogRow(Base):
     snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     # For a reversal entry: the audit entry it reverses. Original rows are never edited.
     reverses_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    severity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    """``Severity`` value; ``NULL`` on legacy rows (read as the action's default)."""
+    result: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    """``EventResult`` value; ``NULL`` for detections and legacy rows."""
+    correlation_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    """Incident id (``INC-001``); ``NULL`` on legacy rows."""
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Structured metadata as JSON (shown in the expandable row details)."""
 
 
 class PendingAdoptionRow(Base):
@@ -87,10 +95,37 @@ class DriftEventRow(Base):
     """What caused the change: ``Poller Evaluation``, ``Baseline Updated (PR #38)`` ..."""
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Concise technical reason: ``Changed: image``, ``All fields match baseline`` ..."""
+    severity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    """``Severity`` value; ``NULL`` on legacy rows (read from the status)."""
+    result: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    """``EventResult`` value when the transition is the outcome of an action."""
+    correlation_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    """Incident id (``INC-001``); ``NULL`` on legacy rows."""
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Structured metadata as JSON (shown in the expandable row details)."""
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class IncidentRow(Base):
+    """One incident: a workload's stretch away from its baseline state.
+
+    The row id is the incident number (``INC-007`` is id 7). ``entity_key`` is the
+    projector's record key (``service:<name>`` or ``container:<id>``) the incident is
+    currently bound to; ``closed_at`` is set when the workload is back to MATCHED or
+    gone, and cleared again if a reversal reopens it.
+    """
+
+    __tablename__ = "incidents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    correlation_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    entity_key: Mapped[str] = mapped_column(String(255), index=True)
+    ref: Mapped[str] = mapped_column(String(255))
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SettingOverrideRow(Base):

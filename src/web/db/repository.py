@@ -7,19 +7,31 @@ module as ORM objects: callers get the Pydantic contracts from ``shared``.
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from shared.constants import REVERSIBLE_ACTIONS, AuditAction, DriftStatus, WhitelistTargetType
+from shared.constants import (
+    REVERSIBLE_ACTIONS,
+    AuditAction,
+    DriftStatus,
+    EventResult,
+    Severity,
+    WhitelistTargetType,
+    audit_severity,
+    correlation_id_for,
+    default_result,
+    status_severity,
+)
 from shared.exceptions import DatabaseWriteError
 from shared.models import AuditLogEntry, PendingAdoption, WhitelistEntry
 from web.db.models_db import (
     AdoptedInstanceRow,
     AuditLogRow,
     DriftEventRow,
+    IncidentRow,
     PendingAdoptionRow,
     SettingOverrideRow,
     WhitelistedEntityRow,
@@ -32,6 +44,11 @@ def _aware(value: datetime | None) -> datetime:
     if value is None:
         return datetime.now(timezone.utc)
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _dump(value: dict[str, Any] | None) -> str | None:
+    """Encode structured metadata for a JSON text column."""
+    return json.dumps(value, default=str) if value is not None else None
 
 
 def _load_snapshot(raw: str | None) -> dict[str, Any] | None:
@@ -83,6 +100,10 @@ class Store:
         *,
         snapshot: dict[str, Any] | None = None,
         reverses_id: int | None = None,
+        severity: Severity | None = None,
+        result: EventResult | None | Literal["default"] = "default",
+        correlation_id: str | None = None,
+        details_json: dict[str, Any] | None = None,
     ) -> int:
         """Append an audit row.
 
@@ -92,6 +113,11 @@ class Store:
             details: Optional free text.
             snapshot: Pre-action state needed to reverse it later (stored as JSON).
             reverses_id: For a reversal, the id of the entry it reverses.
+            severity: Overrides the action's default severity.
+            result: ``success`` / ``failed`` / ``pending``; ``"default"`` uses the
+                action's default (see ``shared.constants.AUDIT_RESULT``), ``None`` none.
+            correlation_id: Incident the row belongs to (``INC-001``).
+            details_json: Structured metadata for the expandable row details.
 
         Returns:
             The new row id.
@@ -99,6 +125,7 @@ class Store:
         Raises:
             DatabaseWriteError: If the insert fails.
         """
+        outcome = default_result(action) if result == "default" else result
         try:
             with self._db.write() as session:
                 row = AuditLogRow(
@@ -109,14 +136,124 @@ class Store:
                     timestamp=datetime.now(timezone.utc),
                     snapshot=json.dumps(snapshot, default=str) if snapshot is not None else None,
                     reverses_id=reverses_id,
+                    severity=(severity or audit_severity(action)).value,
+                    result=outcome.value if outcome else None,
+                    correlation_id=correlation_id,
+                    details_json=_dump(details_json),
                 )
                 session.add(row)
                 session.flush()
                 row_id = row.id
         except Exception as exc:
             raise DatabaseWriteError(f"Cannot write audit row: {exc}") from exc
-        logger.info("AUDIT {} target={} {}", action.value, target, details or "")
+        logger.info(
+            "AUDIT {} target={} {}{}",
+            action.value,
+            target,
+            details or "",
+            f" [{correlation_id}]" if correlation_id else "",
+        )
         return row_id
+
+    def set_audit_result(
+        self,
+        entry_id: int,
+        result: EventResult,
+        *,
+        details: str | None = None,
+        details_json: dict[str, Any] | None = None,
+    ) -> bool:
+        """Resolve a ``pending`` audit row to its final result.
+
+        Audit rows are otherwise immutable: only a row whose result is still
+        ``pending`` can change, once, to ``success`` or ``failed``. ``details``
+        replaces the text and ``details_json`` is merged into the stored metadata.
+
+        Returns:
+            Whether the row was pending and is now resolved.
+
+        Raises:
+            DatabaseWriteError: If the update fails.
+        """
+        if result is EventResult.PENDING:
+            raise ValueError("A pending row can only be resolved to success or failed")
+        try:
+            with self._db.write() as session:
+                row = session.get(AuditLogRow, entry_id)
+                if row is None or row.result != EventResult.PENDING.value:
+                    return False
+                row.result = result.value
+                if details is not None:
+                    row.details = details
+                if details_json:
+                    merged = _load_snapshot(row.details_json) or {}
+                    merged.update(details_json)
+                    row.details_json = _dump(merged)
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot resolve audit row {entry_id}: {exc}") from exc
+        logger.info("AUDIT #{} resolved: {}", entry_id, result.value)
+        return True
+
+    # ------------------------------------------------------------ incidents
+
+    def open_incident(self, entity_key: str, ref: str) -> str:
+        """Start a new incident for an entity and return its correlation id.
+
+        Args:
+            entity_key: Projector record key (``service:<name>`` / ``container:<id>``).
+            ref: Display reference of the entity when the incident opened.
+
+        Returns:
+            The correlation id, ``INC-<n>`` with at least three digits.
+
+        Raises:
+            DatabaseWriteError: If the insert fails.
+        """
+        try:
+            with self._db.write() as session:
+                row = IncidentRow(correlation_id="", entity_key=entity_key, ref=ref)
+                session.add(row)
+                session.flush()
+                row.correlation_id = correlation_id_for(row.id)
+                correlation_id = row.correlation_id
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot open incident for {ref}: {exc}") from exc
+        return correlation_id
+
+    def open_incidents(self) -> dict[str, str]:
+        """Open incidents keyed by the entity they are bound to: ``{entity_key: INC-n}``."""
+        with self._db.session() as session:
+            rows = session.scalars(
+                select(IncidentRow)
+                .where(IncidentRow.closed_at.is_(None))
+                .order_by(IncidentRow.id.asc())
+            ).all()
+        return {row.entity_key: row.correlation_id for row in rows}
+
+    def close_incident(self, correlation_id: str) -> None:
+        """Mark an incident closed (its workload is back to MATCHED or gone)."""
+        try:
+            with self._db.write() as session:
+                session.execute(
+                    update(IncidentRow)
+                    .where(IncidentRow.correlation_id == correlation_id)
+                    .where(IncidentRow.closed_at.is_(None))
+                    .values(closed_at=datetime.now(timezone.utc))
+                )
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot close incident {correlation_id}: {exc}") from exc
+
+    def rebind_incident(self, correlation_id: str, entity_key: str) -> None:
+        """Bind an incident to a (new) entity key and reopen it if it was closed."""
+        try:
+            with self._db.write() as session:
+                session.execute(
+                    update(IncidentRow)
+                    .where(IncidentRow.correlation_id == correlation_id)
+                    .values(entity_key=entity_key, closed_at=None)
+                )
+        except Exception as exc:
+            raise DatabaseWriteError(f"Cannot rebind incident {correlation_id}: {exc}") from exc
 
     def _reversal_index(self, session: Session) -> dict[int, list[tuple[int, str]]]:
         """Reversal rows grouped by the entry they reverse: ``{original: [(id, action)]}``."""
@@ -183,6 +320,10 @@ class Store:
             reversible=reason is None,
             not_reversible_reason=reason,
             reversal_warning=warning if reason is None else None,
+            severity=Severity(row.severity) if row.severity else audit_severity(action),
+            result=EventResult(row.result) if row.result else None,
+            correlation_id=row.correlation_id,
+            details_json=_load_snapshot(row.details_json),
         )
 
     def list_audit(self, limit: int = 200) -> list[AuditLogEntry]:
@@ -399,6 +540,10 @@ class Store:
         trigger: str | None = None,
         reason: str | None = None,
         details: str | None = None,
+        severity: Severity | None = None,
+        result: EventResult | None = None,
+        correlation_id: str | None = None,
+        details_json: dict[str, Any] | None = None,
     ) -> None:
         """Persist a status transition for the Events Log page.
 
@@ -411,6 +556,10 @@ class Store:
             trigger: Short cause label (``Poller Evaluation`` ...).
             reason: Concise technical reason (``Changed: image`` ...).
             details: Legacy free text; new rows leave it empty.
+            severity: Overrides the default (``STATUS_SEVERITY`` of the new status).
+            result: Outcome when the transition is the result of an action.
+            correlation_id: Incident the transition belongs to (``INC-001``).
+            details_json: Structured metadata for the expandable row details.
         """
         try:
             with self._db.write() as session:
@@ -424,6 +573,10 @@ class Store:
                         details=details,
                         trigger=trigger,
                         reason=reason,
+                        severity=(severity or status_severity(drift_status)).value,
+                        result=result.value if result else None,
+                        correlation_id=correlation_id,
+                        details_json=_dump(details_json),
                         hostname=self._hostname,
                         detected_at=datetime.now(timezone.utc),
                     )
@@ -448,6 +601,10 @@ class Store:
                 "details": row.details,
                 "trigger": row.trigger,
                 "reason": row.reason or row.details,
+                "severity": row.severity or status_severity(DriftStatus(row.drift_status)).value,
+                "result": row.result,
+                "correlation_id": row.correlation_id,
+                "details_json": _load_snapshot(row.details_json),
                 "hostname": row.hostname,
                 "detected_at": _aware(row.detected_at),
             }

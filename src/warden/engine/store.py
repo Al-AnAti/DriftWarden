@@ -4,9 +4,9 @@ The concrete implementation lives in ``web.db.repository.Store``; the engine
 only sees this structural protocol so ``warden`` never imports ``web``.
 """
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from shared.constants import AuditAction, DriftStatus, WhitelistTargetType
+from shared.constants import AuditAction, DriftStatus, EventResult, Severity, WhitelistTargetType
 from shared.models import AuditLogEntry, PendingAdoption, WhitelistEntry
 
 
@@ -21,8 +21,39 @@ class StateStore(Protocol):
         *,
         snapshot: dict[str, Any] | None = None,
         reverses_id: int | None = None,
+        severity: Severity | None = None,
+        result: EventResult | None | Literal["default"] = "default",
+        correlation_id: str | None = None,
+        details_json: dict[str, Any] | None = None,
     ) -> int:
         """Append an audit row (optionally with a reversal snapshot) and return its id."""
+        ...
+
+    def set_audit_result(
+        self,
+        entry_id: int,
+        result: EventResult,
+        *,
+        details: str | None = None,
+        details_json: dict[str, Any] | None = None,
+    ) -> bool:
+        """Resolve a ``pending`` audit row to ``success`` or ``failed`` (once)."""
+        ...
+
+    def open_incident(self, entity_key: str, ref: str) -> str:
+        """Start an incident for an entity; returns its ``INC-n`` correlation id."""
+        ...
+
+    def open_incidents(self) -> dict[str, str]:
+        """Open incidents as ``{entity_key: correlation_id}``."""
+        ...
+
+    def close_incident(self, correlation_id: str) -> None:
+        """Close an incident."""
+        ...
+
+    def rebind_incident(self, correlation_id: str, entity_key: str) -> None:
+        """Bind an incident to an entity key, reopening it if closed."""
         ...
 
     def get_audit(self, entry_id: int) -> tuple[AuditLogEntry, dict[str, Any] | None] | None:
@@ -111,6 +142,10 @@ class StateStore(Protocol):
         trigger: str | None = None,
         reason: str | None = None,
         details: str | None = None,
+        severity: Severity | None = None,
+        result: EventResult | None = None,
+        correlation_id: str | None = None,
+        details_json: dict[str, Any] | None = None,
     ) -> None:
         """Persist a status transition with its cause and concise reason."""
         ...

@@ -163,6 +163,120 @@ REVERSIBLE_ACTIONS: frozenset[AuditAction] = frozenset(
 """Audit actions that can be undone from the Events Log when they carry a snapshot."""
 
 
+class Severity(str, Enum):
+    """How urgently an event needs attention; shown as a badge in the Events Log."""
+
+    CRITICAL = "critical"
+    """A declared workload is down."""
+
+    HIGH = "high"
+    """Unmanaged workload on the host, or a remediation that failed."""
+
+    MEDIUM = "medium"
+    """A managed workload diverged from Git, or Enforce changed the host."""
+
+    LOW = "low"
+    """Bookkeeping that changes state but needs no attention."""
+
+    INFO = "info"
+    """Everything is as declared."""
+
+
+class EventResult(str, Enum):
+    """Outcome of an audited action: the RESULT column of the audit log."""
+
+    SUCCESS = "success"
+    """The action completed (and, where it applies, was verified)."""
+
+    FAILED = "failed"
+    """The action did not achieve its goal; the details say why."""
+
+    PENDING = "pending"
+    """The action started and its outcome is not known yet (an open pull request)."""
+
+
+STATUS_SEVERITY: dict[DriftStatus, Severity] = {
+    DriftStatus.MISSING: Severity.CRITICAL,
+    DriftStatus.ROGUE: Severity.HIGH,
+    DriftStatus.DRIFTED: Severity.MEDIUM,
+    DriftStatus.AWAITING_RESTART: Severity.LOW,
+    DriftStatus.PENDING_ADOPTION: Severity.INFO,
+    DriftStatus.MATCHED: Severity.INFO,
+}
+"""Severity of a drift transition, by the status it moved to."""
+
+AUDIT_SEVERITY: dict[AuditAction, Severity] = {
+    AuditAction.MISSING_DETECTED: Severity.CRITICAL,
+    AuditAction.ROGUE_DETECTED: Severity.HIGH,
+    AuditAction.ENFORCE_KILL_FAILED: Severity.HIGH,
+    AuditAction.REVERT_FAILED: Severity.HIGH,
+    AuditAction.ADOPT_FAILED: Severity.HIGH,
+    AuditAction.REVERSAL_FAILED: Severity.HIGH,
+    AuditAction.BASELINE_FETCH_FAILED: Severity.HIGH,
+    AuditAction.DRIFT_DETECTED: Severity.MEDIUM,
+    AuditAction.ENFORCE_KILL: Severity.MEDIUM,
+    AuditAction.REVERT_COMPLETED: Severity.MEDIUM,
+    AuditAction.REVERSAL_COMPLETED: Severity.MEDIUM,
+    AuditAction.ADOPTION_INVALIDATED: Severity.MEDIUM,
+    AuditAction.ADOPT_PR_OPENED: Severity.LOW,
+    AuditAction.ADOPTION_CLOSED: Severity.LOW,
+    AuditAction.ADOPTION_EXPIRED: Severity.LOW,
+    AuditAction.ADOPTION_REVOKED: Severity.LOW,
+    AuditAction.REVERSAL_REFUSED: Severity.LOW,
+    AuditAction.WHITELIST_ADDED: Severity.LOW,
+    AuditAction.WHITELIST_REMOVED: Severity.LOW,
+    AuditAction.SETTINGS_CHANGED: Severity.LOW,
+    AuditAction.BATCH_REQUESTED: Severity.LOW,
+    AuditAction.ADOPTION_MERGED: Severity.INFO,
+    AuditAction.ENGINE_STARTED: Severity.INFO,
+    AuditAction.REVERT_REQUESTED: Severity.INFO,
+    AuditAction.ADOPT_REQUESTED: Severity.INFO,
+    AuditAction.ADOPTION_CLEARED: Severity.INFO,
+    AuditAction.BASELINE_FETCHED: Severity.INFO,
+    AuditAction.STATE_RESTORED: Severity.INFO,
+}
+"""Default severity of each audit action (legacy actions included, for old rows)."""
+
+AUDIT_RESULT: dict[AuditAction, EventResult] = {
+    AuditAction.ENFORCE_KILL: EventResult.SUCCESS,
+    AuditAction.REVERT_COMPLETED: EventResult.SUCCESS,
+    AuditAction.ADOPTION_MERGED: EventResult.SUCCESS,
+    AuditAction.REVERSAL_COMPLETED: EventResult.SUCCESS,
+    AuditAction.ENFORCE_KILL_FAILED: EventResult.FAILED,
+    AuditAction.REVERT_FAILED: EventResult.FAILED,
+    AuditAction.ADOPT_FAILED: EventResult.FAILED,
+    AuditAction.REVERSAL_FAILED: EventResult.FAILED,
+    AuditAction.REVERSAL_REFUSED: EventResult.FAILED,
+    AuditAction.ADOPT_PR_OPENED: EventResult.PENDING,
+}
+"""Result written by default for new rows of these actions; detections and settings
+rows have no result. A caller can override it (for example after verification)."""
+
+
+def status_severity(status: DriftStatus) -> Severity:
+    """Severity of a transition into ``status``."""
+    return STATUS_SEVERITY[status]
+
+
+def audit_severity(action: AuditAction) -> Severity:
+    """Default severity of an audit action."""
+    return AUDIT_SEVERITY.get(action, Severity.INFO)
+
+
+def default_result(action: AuditAction) -> EventResult | None:
+    """Result recorded for a new row of ``action`` when the caller gives none."""
+    return AUDIT_RESULT.get(action)
+
+
+CORRELATION_PREFIX = "INC-"
+"""Prefix of incident correlation ids (``INC-001``)."""
+
+
+def correlation_id_for(number: int) -> str:
+    """Format an incident number as a correlation id: ``7`` -> ``INC-007``."""
+    return f"{CORRELATION_PREFIX}{number:03d}"
+
+
 class WhitelistTargetType(str, Enum):
     """Kinds of entity an operator can exempt from drift evaluation."""
 

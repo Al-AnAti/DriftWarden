@@ -89,6 +89,15 @@ The Events Log page shows each value as a badge (`AUDIT_META` in `web/routes/vie
 colour and filter category: Actions, Detections or Reversals), for example *Enforced
 (Recreated)*, *Enforced (Removed)*, *PR Opened*, *Adoption Merged*, *Reversed*.
 
+**`Severity`** (`critical`, `high`, `medium`, `low`, `info`) and **`EventResult`** (`success`,
+`failed`, `pending`) — the severity and RESULT of Events Log rows. The single source is
+`STATUS_SEVERITY` (transitions, by the status moved to: MISSING critical, ROGUE high, DRIFTED
+medium, AWAITING_RESTART low, PENDING_ADOPTION and MATCHED info), `AUDIT_SEVERITY` and
+`AUDIT_RESULT` (the default result of new audit rows: Enforce and merge success, failures
+failed, `adopt_pr_opened` pending; detections none). Rows written before these existed read
+the default severity and no result. `correlation_id_for(n)` formats incident ids (`INC-001`):
+a detection, the Enforce or Adopt taken on it and any reversal share one; legacy rows have none.
+
 **`WhitelistTargetType`** — `CONTAINER` (matched by id or name) or `PROJECT` (matched by the
 `com.docker.compose.project` label). Stored as the `target_type` column of `whitelisted_entities`.
 

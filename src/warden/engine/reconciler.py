@@ -77,7 +77,12 @@ from warden.engine.diff_engine import (
     observed_service,
     project_networks,
 )
-from warden.engine.state_projector import StateProjector, Transition, transition_trigger
+from warden.engine.state_projector import (
+    StateProjector,
+    Transition,
+    record_key,
+    transition_trigger,
+)
 from warden.engine.store import StateStore
 
 ACTION_CACHE_TTL_SECONDS = 20.0
@@ -199,6 +204,10 @@ class Reconciler:
         self._image_labels_cache: dict[str, dict[str, str]] = {}
         self._pending: dict[str, PendingAdoption] = {}
         self._adopted: dict[str, str] = {}
+        # Incident correlation: open incident per projector record key, plus incidents a
+        # reversal carries over to the container it brings back (by container name).
+        self._incidents: dict[str, str] = {}
+        self._carried_incidents: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
         self._environment_defaults: dict[str, object] = {}
         self._whitelist = WhitelistIndex()
@@ -254,6 +263,7 @@ class Reconciler:
         self._whitelist = index
         self._pending = {p.container_id: p for p in self.store.active_pending()}
         self._adopted = dict(self.store.list_adopted_instances())
+        self._incidents = self.store.open_incidents()
 
     # ------------------------------------------------------------- baseline
 
@@ -399,6 +409,7 @@ class Reconciler:
                     AuditAction.ADOPTION_MERGED,
                     pending.container_name,
                     _merged_details(pending),
+                    correlation_id=self._pending_incident(pending),
                 )
                 self._pending.pop(pending.container_id, None)
                 await self._remember_adopted(pending)
@@ -468,6 +479,7 @@ class Reconciler:
                     AuditAction.ADOPTION_CLOSED,
                     pending.container_name,
                     f"PR #{pending.pr_number} closed without merging",
+                    correlation_id=self._pending_incident(pending),
                 )
                 self._pending.pop(pending.container_id, None)
                 self.schedule_reconcile("pr-closed")
@@ -481,6 +493,7 @@ class Reconciler:
                         AuditAction.ADOPTION_MERGED,
                         pending.container_name,
                         _merged_details(pending),
+                        correlation_id=self._pending_incident(pending),
                     )
                     self._pending.pop(pending.container_id, None)
                     await self._remember_adopted(pending)
@@ -513,6 +526,8 @@ class Reconciler:
                 AuditAction.ADOPTION_INVALIDATED,
                 service,
                 f"adopted instance {container_id[:12]} no longer exists",
+                correlation_id=self._incidents.get(f"container:{container_id}")
+                or self._incidents.get(f"service:{service}"),
             )
 
     async def _sweep_loop(self) -> None:
@@ -645,6 +660,10 @@ class Reconciler:
             transitions = self.projector.transitions(snapshot)
             self.projector.publish(snapshot, transitions)
             await asyncio.to_thread(self._persist_transitions, transitions, trigger)
+            if snapshot.docker_connected and snapshot.baseline.available:
+                await asyncio.to_thread(
+                    self._close_vanished_incidents, {record_key(r) for r in snapshot.records}
+                )
             logger.info(
                 "Reconcile ({}) {} containers -> {}",
                 trigger,
@@ -666,6 +685,7 @@ class Reconciler:
         }
         for change in transitions:
             record, previous = change.record, change.previous_status
+            correlation_id = self._transition_incident(change)
             details = record.message
             if record.changed_fields:
                 details = f"{record.message} Changed: {', '.join(record.changed_fields)}."
@@ -677,12 +697,67 @@ class Reconciler:
                 container_name=record.container_name,
                 trigger=transition_trigger(trigger, change),
                 reason=record.reason or None,
+                correlation_id=correlation_id,
             )
             action = detection_actions.get(record.drift_status)
             if action is not None:
-                self.store.record_audit(action, record.ref, details)
+                self.store.record_audit(action, record.ref, details, correlation_id=correlation_id)
             elif record.drift_status is DriftStatus.MATCHED and previous is not None:
                 logger.info("{} is back to MATCHED (was {})", record.ref, previous.value)
+            if record.drift_status is DriftStatus.MATCHED and correlation_id is not None:
+                self.store.close_incident(correlation_id)
+                self._incidents.pop(record_key(record), None)
+
+    # ------------------------------------------------------------ incidents
+
+    def _transition_incident(self, change: Transition) -> str | None:
+        """Incident a transition belongs to, opening one when a problem starts.
+
+        The incident follows the entity when its key moves (an adopted rogue becomes
+        a declared service) and is picked up again by a container a reversal brought
+        back. A new MATCHED entry starts no incident.
+        """
+        record = change.record
+        key = record_key(record)
+        correlation_id = self._incidents.get(key)
+        if correlation_id is None and change.previous is not None:
+            moved = self._incidents.pop(record_key(change.previous), None)
+            if moved is not None:
+                correlation_id = self._bind_incident(moved, key)
+        if correlation_id is None and record.drift_status is not DriftStatus.MATCHED:
+            carried = self._carried_incidents.pop(record.container_name or record.ref, None)
+            if carried is not None:
+                correlation_id = self._bind_incident(carried, key)
+            else:
+                correlation_id = self.store.open_incident(key, record.ref)
+                self._incidents[key] = correlation_id
+        return correlation_id
+
+    def _bind_incident(self, correlation_id: str, key: str) -> str:
+        self.store.rebind_incident(correlation_id, key)
+        self._incidents[key] = correlation_id
+        return correlation_id
+
+    def _close_vanished_incidents(self, present: set[str]) -> None:
+        """Close incidents whose entity is no longer on the host or in the baseline."""
+        for key in [k for k in self._incidents if k not in present]:
+            self.store.close_incident(self._incidents.pop(key))
+
+    def _record_incident(self, record: DriftRecord) -> str:
+        """Incident an action on ``record`` belongs to (opened if none is open)."""
+        key = record_key(record)
+        correlation_id = self._incidents.get(key)
+        if correlation_id is None:
+            correlation_id = self.store.open_incident(key, record.ref)
+            self._incidents[key] = correlation_id
+        return correlation_id
+
+    def _pending_incident(self, pending: PendingAdoption) -> str | None:
+        """Incident of the workload behind a buffer entry, if one is open."""
+        for key in (f"container:{pending.container_id}", f"service:{pending.service_name}"):
+            if key in self._incidents:
+                return self._incidents[key]
+        return None
 
     async def _expire_pending(self) -> None:
         """Safety TTL for entries whose pull request state cannot be determined.
@@ -705,7 +780,11 @@ class Reconciler:
                 continue
             await asyncio.to_thread(self.store.clear_pending, pending.id, "expired")
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.ADOPTION_EXPIRED, pending.container_name, why
+                self.store.record_audit,
+                AuditAction.ADOPTION_EXPIRED,
+                pending.container_name,
+                why,
+                correlation_id=self._pending_incident(pending),
             )
             self._pending.pop(pending.container_id, None)
             self._pr_unreachable_since.pop(pending.id, None)
@@ -787,6 +866,7 @@ class Reconciler:
             service.container_name or f"{self.baseline.project_name}-{service.service_name}-1"
         )
         self._remember_action(record.container_id, record.container_name, target_name, action_id)
+        correlation_id = await asyncio.to_thread(self._record_incident, record)
         previous = await self._capture_spec(record.container_id)
         try:
             if record.container_id and record.container_name != target_name:
@@ -803,7 +883,11 @@ class Reconciler:
                 "Enforce failed for {} (recreate {}): {}", record.ref, service.service_name, exc
             )
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.REVERT_FAILED, record.ref, str(exc)
+                self.store.record_audit,
+                AuditAction.REVERT_FAILED,
+                record.ref,
+                str(exc),
+                correlation_id=correlation_id,
             )
             raise
         except Exception as exc:  # never let a Docker SDK surprise vanish silently
@@ -811,7 +895,11 @@ class Reconciler:
                 "Enforce failed for {} (recreate {}): {}", record.ref, service.service_name, exc
             )
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.REVERT_FAILED, record.ref, repr(exc)
+                self.store.record_audit,
+                AuditAction.REVERT_FAILED,
+                record.ref,
+                repr(exc),
+                correlation_id=correlation_id,
             )
             raise ContainerRecreateError(
                 f"Enforce failed for {record.ref}: {exc.__class__.__name__}: {exc}"
@@ -837,6 +925,7 @@ class Reconciler:
                 "created_name": target_name,
                 "previous": previous,
             },
+            correlation_id=correlation_id,
         )
         if not autonomous:
             self.schedule_reconcile("revert")
@@ -861,19 +950,28 @@ class Reconciler:
         if not record.container_id:
             raise DriftWardenError(f"'{record.ref}' has no container to remove")
         self._remember_action(record.container_id, record.container_name)
+        correlation_id = await asyncio.to_thread(self._record_incident, record)
         previous = await self._capture_spec(record.container_id)
         try:
             await asyncio.to_thread(self.watcher.stop_and_remove, record.container_id)
         except (RogueContainerKillError, DockerConnectionError) as exc:
             logger.exception("Enforce failed for {} (remove): {}", record.ref, exc)
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.ENFORCE_KILL_FAILED, record.ref, str(exc)
+                self.store.record_audit,
+                AuditAction.ENFORCE_KILL_FAILED,
+                record.ref,
+                str(exc),
+                correlation_id=correlation_id,
             )
             raise
         except Exception as exc:  # never let a Docker SDK surprise vanish silently
             logger.exception("Enforce failed for {} (remove): {}", record.ref, exc)
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.ENFORCE_KILL_FAILED, record.ref, repr(exc)
+                self.store.record_audit,
+                AuditAction.ENFORCE_KILL_FAILED,
+                record.ref,
+                repr(exc),
+                correlation_id=correlation_id,
             )
             raise RogueContainerKillError(
                 f"Enforce failed for {record.ref}: {exc.__class__.__name__}: {exc}"
@@ -886,6 +984,7 @@ class Reconciler:
             f"{'autonomous' if autonomous else 'manual'} removal of {record.container_name} "
             f"({record.image})",
             snapshot={"type": "enforce_remove", "previous": previous} if previous else None,
+            correlation_id=correlation_id,
         )
         if not autonomous:
             self.schedule_reconcile("kill")
@@ -928,6 +1027,7 @@ class Reconciler:
             else f"warden: sync {service_name} with live container {container.name}"
         )
         body = _pr_body(record, container, spec, note, self.settings.hostname, is_update)
+        correlation_id = await asyncio.to_thread(self._record_incident, record)
         github = self.github
         if github is None:
             raise AdoptionError("Adoption needs GitHub; ALLOW_MOCK_BASELINE is enabled")
@@ -942,7 +1042,11 @@ class Reconciler:
             )
         except AdoptionError as exc:
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.ADOPT_FAILED, record.ref, str(exc)
+                self.store.record_audit,
+                AuditAction.ADOPT_FAILED,
+                record.ref,
+                str(exc),
+                correlation_id=correlation_id,
             )
             raise
         pending = await asyncio.to_thread(
@@ -970,6 +1074,7 @@ class Reconciler:
                 + _note_suffix(note)
             ),
             snapshot=_adopt_snapshot(pull, container.id, final_name, "adopt", batch=False),
+            correlation_id=correlation_id,
         )
         self.schedule_reconcile("adopt")
         verb = "Reusing open" if pull.reused else "Opened"
@@ -1068,6 +1173,9 @@ class Reconciler:
             return text
 
         count = len(plans) + len(removals)
+        incidents: dict[str, str] = {}
+        for record in [p.record for p in plans] + removals:
+            incidents[record.ref] = await asyncio.to_thread(self._record_incident, record)
         plural = "s" if count != 1 else ""
         title = f"warden: batch adopt {count} workload{plural} from {self.settings.hostname}"
         body = _batch_pr_body(plans, removals, note, self.settings.hostname)
@@ -1085,7 +1193,11 @@ class Reconciler:
         except AdoptionError as exc:
             for record in [p.record for p in plans] + removals:
                 await asyncio.to_thread(
-                    self.store.record_audit, AuditAction.ADOPT_FAILED, record.ref, str(exc)
+                    self.store.record_audit,
+                    AuditAction.ADOPT_FAILED,
+                    record.ref,
+                    str(exc),
+                    correlation_id=incidents.get(record.ref),
                 )
                 results.append(
                     ActionResult(ok=False, action="adopt", target=record.ref, message=str(exc))
@@ -1119,6 +1231,7 @@ class Reconciler:
                     + _note_suffix(note)
                 ),
                 snapshot=_adopt_snapshot(pull, plan.container.id, service, "adopt", batch=True),
+                correlation_id=incidents.get(plan.record.ref),
             )
             results.append(
                 ActionResult(
@@ -1154,6 +1267,7 @@ class Reconciler:
                 f"PR #{pull.number} opened (batch of {count}): remove service '{service}'"
                 + _note_suffix(note),
                 snapshot=_adopt_snapshot(pull, key, service, "remove", batch=True),
+                correlation_id=incidents.get(record.ref),
             )
             results.append(
                 ActionResult(
@@ -1185,6 +1299,7 @@ class Reconciler:
             except YAMLMutationError as exc:
                 raise AdoptionError(str(exc)) from exc
 
+        correlation_id = await asyncio.to_thread(self._record_incident, record)
         lines = [
             "## DriftWarden Reverse-GitOps adoption (deletion)",
             "",
@@ -1211,7 +1326,11 @@ class Reconciler:
             )
         except AdoptionError as exc:
             await asyncio.to_thread(
-                self.store.record_audit, AuditAction.ADOPT_FAILED, record.ref, str(exc)
+                self.store.record_audit,
+                AuditAction.ADOPT_FAILED,
+                record.ref,
+                str(exc),
+                correlation_id=correlation_id,
             )
             raise
         pending = await asyncio.to_thread(
@@ -1233,6 +1352,7 @@ class Reconciler:
             f"PR #{pull.number} {'reused' if pull.reused else 'opened'}: "
             f"remove service '{service_name}'{_note_suffix(note)}",
             snapshot=_adopt_snapshot(pull, buffer_key, service_name, "remove", batch=False),
+            correlation_id=correlation_id,
         )
         self.schedule_reconcile("adopt-deletion")
         verb = "Reusing open" if pull.reused else "Opened"
@@ -1291,6 +1411,7 @@ class Reconciler:
                 entry.container_name,
                 f"{detail}; {len(evicted)} buffered entr{'y' if len(evicted) == 1 else 'ies'} "
                 "evicted",
+                correlation_id=self._pending_incident(entry),
             )
         self.schedule_reconcile("revoke")
         names = ", ".join(sorted(e.container_name for e in evicted))
@@ -1328,6 +1449,7 @@ class Reconciler:
             entry.target,
             f"reverses #{entry.id} ({entry.action.value}): {details}",
             reverses_id=entry.id,
+            correlation_id=entry.correlation_id,
         )
 
     async def reverse(self, entry_id: int) -> ActionResult:
@@ -1394,6 +1516,7 @@ class Reconciler:
                     steps.append("the container Enforce created was already gone")
             if previous:
                 new_id, warnings = await self._restore(previous, action_id)
+                self._carry_incident(entry, previous)
                 steps.append(
                     f"restored {previous.get('name')} ({previous.get('image')}) as {new_id[:12]}"
                 )
@@ -1418,12 +1541,19 @@ class Reconciler:
             )
         try:
             new_id, warnings = await self._restore(previous, uuid.uuid4().hex[:12])
+            self._carry_incident(entry, previous)
         except (ContainerRecreateError, DockerConnectionError) as exc:
             await self._record_reversal(entry, AuditAction.REVERSAL_FAILED, f"failed: {exc}")
             raise DriftWardenError(f"Reversal of #{entry.id} failed: {exc}") from exc
         warnings.append("changes made inside the container's filesystem outside volumes are lost")
         steps = [f"recreated {previous.get('name')} ({previous.get('image')}) as {new_id[:12]}"]
         return await self._reversal_done(entry, steps, warnings)
+
+    def _carry_incident(self, entry: AuditLogEntry, previous: dict[str, Any]) -> None:
+        """Let the container a reversal brings back rejoin the original incident."""
+        name = str(previous.get("name") or "")
+        if entry.correlation_id and name:
+            self._carried_incidents[name] = entry.correlation_id
 
     async def _reversal_done(
         self, entry: AuditLogEntry, steps: list[str], warnings: list[str]

@@ -89,10 +89,11 @@ instead of poking at `request.app.state` with strings. If the lifespan did not r
 
 | Table | Model | Columns | Written by |
 | --- | --- | --- | --- |
-| `audit_log` | `AuditLogRow` | `id`, `action` (an `AuditAction` value), `target`, `details`, `hostname`, `timestamp` | `Store.record_audit` (engine and routes) |
+| `audit_log` | `AuditLogRow` | `id`, `action` (an `AuditAction` value), `target`, `details`, `hostname`, `timestamp`, `snapshot`, `reverses_id`, `severity`, `result`, `correlation_id`, `details_json` | `Store.record_audit` (engine and routes) |
 | `pending_adoptions` | `PendingAdoptionRow` | `id`, `kind`, `pr_state`, `container_id`, `container_name`, `service_name`, `pr_number`, `pr_url`, `branch`, `created_at`, `expires_at`, `cleared_at`, `outcome` | adoption paths; an entry is "active" while `cleared_at IS NULL` |
 | `whitelisted_entities` | `WhitelistedEntityRow` | `id`, `target_type`, `target_identifier`, `reason`, `created_at`; unique on (`target_type`, `target_identifier`) | whitelist routes |
-| `drift_events` | `DriftEventRow` | `id`, `ref`, `drift_status`, `previous_status`, `service_name`, `container_name`, `trigger`, `reason`, `details` (legacy prose, empty on new rows), `hostname`, `detected_at` | `_persist_transitions` after every cycle |
+| `drift_events` | `DriftEventRow` | `id`, `ref`, `drift_status`, `previous_status`, `service_name`, `container_name`, `trigger`, `reason`, `details` (legacy prose, empty on new rows), `severity`, `result`, `correlation_id`, `details_json`, `hostname`, `detected_at` | `_persist_transitions` after every cycle |
+| `incidents` | `IncidentRow` | `id` (the incident number), `correlation_id` (`INC-007`), `entity_key` (`service:<name>` / `container:<id>`), `ref`, `opened_at`, `closed_at` | the reconciler's incident tracking |
 | `setting_overrides` | `SettingOverrideRow` | `key` (primary), `value`, `updated_at` | Cluster Config saves |
 
 Timestamps are `DateTime(timezone=True)` and always UTC. SQLite drops the timezone on read,

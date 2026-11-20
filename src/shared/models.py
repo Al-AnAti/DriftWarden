@@ -13,6 +13,8 @@ from shared.constants import (
     AuditAction,
     BaselineSource,
     DriftStatus,
+    EventResult,
+    Severity,
     WhitelistTargetType,
 )
 
@@ -408,6 +410,12 @@ class AuditLogEntry(BaseModel):
         reversible: Whether the Events Log may offer Reverse for this entry now.
         not_reversible_reason: Why Reverse is unavailable, for the button tooltip.
         reversal_warning: What a reversal cannot restore, shown in the confirmation.
+        severity: Stored severity, or the action's default for rows written before it.
+        result: ``success`` / ``failed`` / ``pending``; ``None`` for detections and
+            rows written before results existed.
+        correlation_id: Incident id (``INC-001``) shared by a detection, the actions
+            taken on it and their reversals; ``None`` on rows written before it.
+        details_json: Structured metadata (container ids, image, Git SHA, diff ...).
     """
 
     model_config = ConfigDict(use_enum_values=False, extra="forbid")
@@ -423,6 +431,10 @@ class AuditLogEntry(BaseModel):
     reversible: bool = False
     not_reversible_reason: str | None = None
     reversal_warning: str | None = None
+    severity: Severity = Severity.INFO
+    result: EventResult | None = None
+    correlation_id: str | None = None
+    details_json: dict[str, Any] | None = None
 
 
 class ActionResult(BaseModel):

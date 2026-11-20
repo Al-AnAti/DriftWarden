@@ -78,7 +78,7 @@ class AuditAction(str, Enum):
     """Enforcement tried to terminate a rogue container and failed."""
 
     REVERT_REQUESTED = "revert_requested"
-    """A drifted or missing service was commanded to revert to the Git baseline."""
+    """Legacy (no longer written): a manual Enforce was requested."""
 
     REVERT_COMPLETED = "revert_completed"
     """A service was recreated from the Git baseline successfully."""
@@ -87,7 +87,8 @@ class AuditAction(str, Enum):
     """Recreating a service from the Git baseline failed."""
 
     ADOPT_REQUESTED = "adopt_requested"
-    """An adoption request was created for a rogue or drifted container."""
+    """Legacy (no longer written): an adoption was requested; ``adopt_pr_opened`` or
+    ``adopt_failed`` now records the outcome alone."""
 
     ADOPT_PR_OPENED = "adopt_pr_opened"
     """A Reverse-GitOps pull request was opened for an adopted container."""
@@ -96,19 +97,19 @@ class AuditAction(str, Enum):
     """An adoption request could not be turned into a pull request."""
 
     ADOPTION_CLEARED = "adoption_cleared"
-    """A pending adoption was cleared because the baseline now declares the service."""
+    """Legacy (no longer written): replaced by ``adoption_merged``."""
 
     ADOPTION_EXPIRED = "adoption_expired"
     """A pending adoption without a pull request reached its fallback TTL."""
 
     ADOPTION_MERGED = "adoption_merged"
-    """The adoption pull request was merged; the baseline is being re-fetched."""
+    """The adoption pull request was merged and the baseline now reflects it."""
 
     ADOPTION_CLOSED = "adoption_closed"
     """The adoption pull request was closed without merging; the entry left the buffer."""
 
     BASELINE_FETCHED = "baseline_fetched"
-    """The declarative baseline was fetched successfully."""
+    """Legacy (no longer written): baseline loads go to the application log."""
 
     BASELINE_FETCH_FAILED = "baseline_fetch_failed"
     """The declarative baseline could not be fetched."""
@@ -123,7 +124,7 @@ class AuditAction(str, Enum):
     """A baseline service has no running container."""
 
     STATE_RESTORED = "state_restored"
-    """A previously rogue, drifted or missing entry returned to the baseline state."""
+    """Legacy (no longer written): returns to MATCHED are drift transitions only."""
 
     WHITELIST_ADDED = "whitelist_added"
     """An operator exempted a container or Compose project from evaluation."""

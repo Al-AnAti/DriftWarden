@@ -66,7 +66,8 @@ async def test_startup_loads_baseline_and_observes(
     assert snapshot.counts()["matched"] == 2
     assert snapshot.overall == "in_sync"
     actions = [row.action for row in store.list_audit()]
-    assert AuditAction.ENGINE_STARTED in actions and AuditAction.BASELINE_FETCHED in actions
+    assert AuditAction.ENGINE_STARTED in actions
+    assert AuditAction.BASELINE_FETCHED not in actions  # plumbing goes to the app log
 
 
 async def test_event_triggers_reconcile_and_records_transitions(
@@ -122,8 +123,10 @@ async def test_manual_revert_recreates_drifted_and_missing(
     assert result.ok
     assert [r[0] for r in watcher.recreated] == ["cache", "web"]
     actions = [row.action for row in store.list_audit()]
-    assert actions.count(AuditAction.REVERT_REQUESTED) == 2
+    assert AuditAction.REVERT_REQUESTED not in actions  # one self-contained row per Enforce
     assert actions.count(AuditAction.REVERT_COMPLETED) == 2
+    await reconciler.reconcile("test")  # both back to MATCHED: a transition, not an audit row
+    assert AuditAction.STATE_RESTORED not in [row.action for row in store.list_audit()]
     with pytest.raises(DriftWardenError):
         await reconciler.revert("does-not-exist")
 
@@ -282,7 +285,16 @@ async def test_adopt_opens_pr_buffers_and_clears_on_baseline_change(
         assert [p.container_name for p in reconciler.pending] == []
         outcomes = {p.container_name: outcome for p, outcome in store.pending_history()}
         assert outcomes == {"rogue-db": "baseline_updated", drifted_cache.name: "baseline_updated"}
-        assert AuditAction.ADOPTION_CLEARED in [row.action for row in store.list_audit()]
+        audit = store.list_audit()
+        actions = [row.action for row in audit]
+        assert AuditAction.ADOPTION_CLEARED not in actions
+        assert AuditAction.ADOPT_REQUESTED not in actions
+        assert actions.count(AuditAction.ADOPT_PR_OPENED) == 2
+        assert actions.count(AuditAction.ADOPTION_MERGED) == 2
+        opened = next(r for r in audit if r.action is AuditAction.ADOPT_PR_OPENED)
+        assert opened.details == (f"PR #2 opened: sync service 'cache' with '{drifted_cache.name}'")
+        first = [r for r in audit if r.action is AuditAction.ADOPT_PR_OPENED][-1]
+        assert first.details == "PR #1 opened: adopt 'rogue-db' as service 'rogue-db'; note: hotfix"
     finally:
         await reconciler.stop()
 
@@ -357,7 +369,10 @@ async def test_merged_pull_request_refreshes_baseline_and_clears_buffer(
         assert reconciler.pending == []
         assert store.pending_history()[0][1] == "baseline_updated"
         actions = [row.action for row in store.list_audit()]
-        assert AuditAction.ADOPTION_MERGED in actions and AuditAction.ADOPTION_CLEARED in actions
+        assert actions.count(AuditAction.ADOPTION_MERGED) == 1
+        assert AuditAction.ADOPTION_CLEARED not in actions
+        merged = next(r for r in store.list_audit() if r.action is AuditAction.ADOPTION_MERGED)
+        assert merged.details == "PR #1 merged; service 'rogue-db' is now tracked in baseline"
         record = reconciler.projector.snapshot.find("rogue-db")
         assert record is not None and record.drift_status is not DriftStatus.PENDING_ADOPTION
         assert record.service_name == "rogue-db"  # now declared in the merged baseline

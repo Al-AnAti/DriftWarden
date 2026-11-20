@@ -71,19 +71,23 @@ All four enums subclass `str`, so their values serialise to plain strings in JSO
 | `AWAITING_RESTART` | An adopted rogue container whose PR merged: declared in Git, still running without Compose labels; `revert` (Enforce) or `docker compose up` turns it into `MATCHED`. |
 | `PENDING_ADOPTION` | `pending_adoption` | Buffered while an adoption pull request is open; exempt from enforcement. |
 
-**`AuditAction`** — every row in the `audit_log` table has one of these. Grouped by who writes them:
+**`AuditAction`** — every row in the `audit_log` table has one of these. The audit log is the
+operator action history: one row per action or detection, never internal plumbing. Grouped by
+who writes them:
 
 | Group | Members |
 | --- | --- |
-| Enforcement | `ENFORCE_KILL`, `ENFORCE_KILL_FAILED`, `REVERT_REQUESTED`, `REVERT_COMPLETED`, `REVERT_FAILED` |
-| Adoption | `ADOPT_REQUESTED`, `ADOPT_PR_OPENED`, `ADOPT_FAILED`, `ADOPTION_CLEARED`, `ADOPTION_EXPIRED`, `ADOPTION_MERGED`, `ADOPTION_CLOSED`, `ADOPTION_REVOKED` |
-| Baseline | `BASELINE_FETCHED`, `BASELINE_FETCH_FAILED` |
-| Detection | `ROGUE_DETECTED`, `DRIFT_DETECTED`, `MISSING_DETECTED`, `STATE_RESTORED` |
+| Enforcement | `REVERT_COMPLETED`, `ENFORCE_KILL` (one self-contained row each), `REVERT_FAILED`, `ENFORCE_KILL_FAILED` |
+| Adoption | `ADOPT_PR_OPENED` or `ADOPT_FAILED`, then `ADOPTION_MERGED`, `ADOPTION_CLOSED`, `ADOPTION_REVOKED`, `ADOPTION_EXPIRED`, `ADOPTION_INVALIDATED` |
+| Reversal | `REVERSAL_COMPLETED`, `REVERSAL_FAILED`, `REVERSAL_REFUSED` |
+| Detection | `ROGUE_DETECTED`, `DRIFT_DETECTED`, `MISSING_DETECTED` |
 | Operator | `WHITELIST_ADDED`, `WHITELIST_REMOVED`, `SETTINGS_CHANGED`, `BATCH_REQUESTED` |
-| Lifecycle | `ENGINE_STARTED` |
+| System | `ENGINE_STARTED`, `BASELINE_FETCH_FAILED` |
+| Legacy (no longer written) | `REVERT_REQUESTED`, `ADOPT_REQUESTED`, `ADOPTION_CLEARED` (now `ADOPTION_MERGED`), `BASELINE_FETCHED`, `STATE_RESTORED` (the last two go to the application log) |
 
-The Events Log page colours a row by its value: anything containing `failed` is red, anything
-containing `detected` is amber, and `revert_completed`, `adopt_pr_opened`, `state_restored` are green.
+The Events Log page shows each value as a badge (`AUDIT_META` in `web/routes/views.py`: label,
+colour and filter category: Actions, Detections or Reversals), for example *Enforced
+(Recreated)*, *Enforced (Removed)*, *PR Opened*, *Adoption Merged*, *Reversed*.
 
 **`WhitelistTargetType`** — `CONTAINER` (matched by id or name) or `PROJECT` (matched by the
 `com.docker.compose.project` label). Stored as the `target_type` column of `whitelisted_entities`.

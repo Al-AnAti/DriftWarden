@@ -1,6 +1,7 @@
 """Server-rendered pages: Dashboard, Diff, Events Log, State Buffer, Cluster Config."""
 
 import difflib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,8 +9,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
-from shared.constants import REVERSIBLE_ACTIONS, DriftStatus
+from shared.constants import REVERSIBLE_ACTIONS, AuditAction, DriftStatus
 from shared.models import DriftRecord
 from warden.engine.state_projector import snapshot_payload
 from web.runtime import WardenRuntime, get_runtime
@@ -38,6 +40,159 @@ OVERALL_META: dict[str, dict[str, str]] = {
     "baseline_unavailable": {"label": "BASELINE_UNAVAILABLE", "tone": "rose"},
 }
 """Headline pill text and colour per overall status."""
+
+AUDIT_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("all", "All"),
+    ("actions", "Actions"),
+    ("detections", "Detections"),
+    ("reversals", "Reversals"),
+)
+"""Filter pills above the audit log: key and label."""
+
+_A = AuditAction
+AUDIT_META: dict[str, dict[str, str]] = {
+    _A.ROGUE_DETECTED.value: {"label": "Rogue Detected", "tone": "rose", "category": "detections"},
+    _A.DRIFT_DETECTED.value: {"label": "Drift Detected", "tone": "amber", "category": "detections"},
+    _A.MISSING_DETECTED.value: {
+        "label": "Missing Detected",
+        "tone": "sky",
+        "category": "detections",
+    },
+    _A.STATE_RESTORED.value: {
+        "label": "State Restored",
+        "tone": "emerald",
+        "category": "detections",
+    },
+    _A.REVERT_COMPLETED.value: {
+        "label": "Enforced (Recreated)",
+        "tone": "emerald",
+        "category": "actions",
+    },
+    _A.ENFORCE_KILL.value: {
+        "label": "Enforced (Removed)",
+        "tone": "emerald",
+        "category": "actions",
+    },
+    _A.REVERT_FAILED.value: {
+        "label": "Enforce Failed (Recreate)",
+        "tone": "rose",
+        "category": "actions",
+    },
+    _A.ENFORCE_KILL_FAILED.value: {
+        "label": "Enforce Failed (Remove)",
+        "tone": "rose",
+        "category": "actions",
+    },
+    _A.REVERT_REQUESTED.value: {
+        "label": "Enforce Requested",
+        "tone": "slate",
+        "category": "actions",
+    },
+    _A.ADOPT_REQUESTED.value: {"label": "Adopt Requested", "tone": "slate", "category": "actions"},
+    _A.ADOPT_PR_OPENED.value: {"label": "PR Opened", "tone": "violet", "category": "actions"},
+    _A.ADOPT_FAILED.value: {"label": "Adopt Failed", "tone": "rose", "category": "actions"},
+    _A.ADOPTION_MERGED.value: {
+        "label": "Adoption Merged",
+        "tone": "emerald",
+        "category": "actions",
+    },
+    _A.ADOPTION_CLEARED.value: {
+        "label": "Adoption Cleared",
+        "tone": "emerald",
+        "category": "actions",
+    },
+    _A.ADOPTION_CLOSED.value: {"label": "PR Closed", "tone": "slate", "category": "actions"},
+    _A.ADOPTION_EXPIRED.value: {
+        "label": "Adoption Expired",
+        "tone": "orange",
+        "category": "actions",
+    },
+    _A.ADOPTION_INVALIDATED.value: {
+        "label": "Adoption Invalidated",
+        "tone": "orange",
+        "category": "actions",
+    },
+    _A.ADOPTION_REVOKED.value: {
+        "label": "Adoption Revoked",
+        "tone": "slate",
+        "category": "actions",
+    },
+    _A.REVERSAL_COMPLETED.value: {"label": "Reversed", "tone": "indigo", "category": "reversals"},
+    _A.REVERSAL_FAILED.value: {"label": "Reversal Failed", "tone": "rose", "category": "reversals"},
+    _A.REVERSAL_REFUSED.value: {
+        "label": "Reversal Refused",
+        "tone": "orange",
+        "category": "reversals",
+    },
+    _A.WHITELIST_ADDED.value: {"label": "Whitelisted", "tone": "slate", "category": "actions"},
+    _A.WHITELIST_REMOVED.value: {
+        "label": "Whitelist Removed",
+        "tone": "slate",
+        "category": "actions",
+    },
+    _A.SETTINGS_CHANGED.value: {
+        "label": "Settings Changed",
+        "tone": "slate",
+        "category": "actions",
+    },
+    _A.BATCH_REQUESTED.value: {"label": "Batch Requested", "tone": "slate", "category": "actions"},
+    _A.ENGINE_STARTED.value: {"label": "Engine Started", "tone": "slate", "category": "actions"},
+    _A.BASELINE_FETCHED.value: {
+        "label": "Baseline Fetched",
+        "tone": "slate",
+        "category": "actions",
+    },
+    _A.BASELINE_FETCH_FAILED.value: {
+        "label": "Baseline Fetch Failed",
+        "tone": "rose",
+        "category": "actions",
+    },
+}
+"""Badge label, colour family and filter category per audit action."""
+
+_PR_REFERENCE = re.compile(r"PR #(\d+)(?: https://github\.com/[^\s]+/pull/\d+)?")
+
+
+def pr_links(text: str | None, base_url: str | None) -> Markup:
+    """Escape ``text`` and turn every ``PR #N`` into a link to that pull request.
+
+    A raw pull request URL right after the reference (older rows wrote one) is folded
+    into the link. Without a GitHub repository the references stay plain text.
+
+    Args:
+        text: Audit detail text.
+        base_url: ``https://github.com/<owner>/<repo>/pull/``, or ``None``.
+
+    Returns:
+        Safe HTML for the template.
+    """
+    if not text:
+        return Markup("")
+    out: list[str] = []
+    last = 0
+    for match in _PR_REFERENCE.finditer(text):
+        out.append(str(escape(text[last : match.start()])))
+        number = match.group(1)
+        if base_url:
+            out.append(
+                f'<a class="text-indigo-300 hover:underline" href="{escape(base_url)}{number}" '
+                f'target="_blank" rel="noopener noreferrer">PR #{number}</a>'
+            )
+        else:
+            out.append(f"PR #{number}")
+        last = match.end()
+    out.append(str(escape(text[last:])))
+    return Markup("".join(out))
+
+
+templates.env.filters["pr_links"] = pr_links
+
+
+def pull_base_url(target_repo: str | None, mock: bool) -> str | None:
+    """Prefix of pull request URLs for the configured repository."""
+    if mock or not target_repo:
+        return None
+    return f"https://github.com/{target_repo.strip().strip('/')}/pull/"
 
 
 @dataclass(slots=True, frozen=True)
@@ -148,7 +303,17 @@ def events_page(request: Request) -> HTMLResponse:
     """Audit log and drift transitions."""
     runtime = get_runtime(request)
     context = base_context(request, runtime, "events")
-    context["audit"] = runtime.store.list_audit(limit=200)
+    audit = runtime.store.list_audit(limit=200)
+    context["audit"] = audit
+    context["audit_meta"] = AUDIT_META
+    context["audit_categories"] = AUDIT_CATEGORIES
+    context["audit_counts"] = {
+        key: sum(1 for a in audit if key == "all" or AUDIT_META[a.action.value]["category"] == key)
+        for key, _ in AUDIT_CATEGORIES
+    }
+    context["pr_base_url"] = pull_base_url(
+        runtime.settings.target_repo, runtime.settings.allow_mock_baseline
+    )
     context["reversible_actions"] = sorted(a.value for a in REVERSIBLE_ACTIONS)
     context["events"] = runtime.store.list_drift_events(limit=200)
     return templates.TemplateResponse(request, "events.html", context)

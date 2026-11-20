@@ -345,11 +345,12 @@ class Reconciler:
             self.baseline = previous
             return False
         self._baseline_changed_at = time.monotonic()
-        self.store.record_audit(
-            AuditAction.BASELINE_FETCHED,
-            f"{baseline.project_name}",
-            f"source={baseline.source.value} sha={(baseline.sha or '')[:12]} "
-            f"services={baseline.service_names}",
+        logger.info(
+            "Baseline {} loaded from {} (sha {}): services {}",
+            baseline.project_name,
+            baseline.source.value,
+            (baseline.sha or "")[:12],
+            baseline.service_names,
         )
         return True
 
@@ -390,17 +391,14 @@ class Reconciler:
         assert self.baseline is not None
         for pending in list(self._pending.values()):
             declared = pending.service_name in self.baseline.services
-            if pending.kind == "remove":
-                satisfied, why = not declared, "removed from baseline"
-            else:
-                satisfied, why = declared, "now declared in baseline"
+            satisfied = not declared if pending.kind == "remove" else declared
             if satisfied:
                 await asyncio.to_thread(self.store.clear_pending, pending.id, "baseline_updated")
                 await asyncio.to_thread(
                     self.store.record_audit,
-                    AuditAction.ADOPTION_CLEARED,
+                    AuditAction.ADOPTION_MERGED,
                     pending.container_name,
-                    f"service {pending.service_name} {why}",
+                    _merged_details(pending),
                 )
                 self._pending.pop(pending.container_id, None)
                 await self._remember_adopted(pending)
@@ -458,11 +456,10 @@ class Reconciler:
             self._pending[pending.container_id] = pending.model_copy(update={"pr_state": state})
             if state == "merged":
                 merged = True
-                await asyncio.to_thread(
-                    self.store.record_audit,
-                    AuditAction.ADOPTION_MERGED,
+                logger.info(
+                    "PR #{} for {} merged; refreshing baseline",
+                    pending.pr_number,
                     pending.container_name,
-                    f"PR #{pending.pr_number} merged; refreshing baseline",
                 )
             elif state == "closed":
                 await asyncio.to_thread(self.store.clear_pending, pending.id, "pr_closed")
@@ -479,6 +476,12 @@ class Reconciler:
             for pending in list(self._pending.values()):
                 if pending.pr_state == "merged":
                     await asyncio.to_thread(self.store.clear_pending, pending.id, "pr_merged")
+                    await asyncio.to_thread(
+                        self.store.record_audit,
+                        AuditAction.ADOPTION_MERGED,
+                        pending.container_name,
+                        _merged_details(pending),
+                    )
                     self._pending.pop(pending.container_id, None)
                     await self._remember_adopted(pending)
             self.schedule_reconcile("pr-merged")
@@ -679,9 +682,7 @@ class Reconciler:
             if action is not None:
                 self.store.record_audit(action, record.ref, details)
             elif record.drift_status is DriftStatus.MATCHED and previous is not None:
-                self.store.record_audit(
-                    AuditAction.STATE_RESTORED, record.ref, f"was {previous.value}"
-                )
+                logger.info("{} is back to MATCHED (was {})", record.ref, previous.value)
 
     async def _expire_pending(self) -> None:
         """Safety TTL for entries whose pull request state cannot be determined.
@@ -773,9 +774,6 @@ class Reconciler:
             raise DriftWardenError(f"'{ref}' is not a baseline service; use Enforce Kill or Adopt")
         if record.drift_status is DriftStatus.PENDING_ADOPTION:
             raise DriftWardenError(f"'{ref}' is buffered for adoption and exempt from enforcement")
-        await asyncio.to_thread(
-            self.store.record_audit, AuditAction.REVERT_REQUESTED, record.ref, record.message
-        )
         return await self._revert_record(record, autonomous=False)
 
     async def _revert_record(self, record: DriftRecord, *, autonomous: bool) -> ActionResult:
@@ -924,9 +922,6 @@ class Reconciler:
                 raise AdoptionError(str(exc)) from exc
             return text
 
-        await asyncio.to_thread(
-            self.store.record_audit, AuditAction.ADOPT_REQUESTED, record.ref, note or record.message
-        )
         title = (
             f"warden: adopt {container.name} as service {service_name}"
             if not is_update
@@ -965,7 +960,15 @@ class Reconciler:
             self.store.record_audit,
             AuditAction.ADOPT_PR_OPENED,
             record.ref,
-            f"PR #{pull.number} {pull.url}{' (reused open PR)' if pull.reused else ''}",
+            (
+                f"PR #{pull.number} {'reused' if pull.reused else 'opened'}: "
+                + (
+                    f"sync service '{final_name}' with '{container.name}'"
+                    if is_update
+                    else f"adopt '{container.name}' as service '{final_name}'"
+                )
+                + _note_suffix(note)
+            ),
             snapshot=_adopt_snapshot(pull, container.id, final_name, "adopt", batch=False),
         )
         self.schedule_reconcile("adopt")
@@ -1064,10 +1067,6 @@ class Reconciler:
                 raise AdoptionError(str(exc)) from exc
             return text
 
-        for record in [p.record for p in plans] + removals:
-            await asyncio.to_thread(
-                self.store.record_audit, AuditAction.ADOPT_REQUESTED, record.ref, note or "batch"
-            )
         count = len(plans) + len(removals)
         plural = "s" if count != 1 else ""
         title = f"warden: batch adopt {count} workload{plural} from {self.settings.hostname}"
@@ -1110,7 +1109,15 @@ class Reconciler:
                 self.store.record_audit,
                 AuditAction.ADOPT_PR_OPENED,
                 plan.record.ref,
-                f"batch PR #{pull.number} {pull.url}",
+                (
+                    f"PR #{pull.number} opened (batch of {count}): "
+                    + (
+                        f"sync service '{service}' with '{plan.container.name}'"
+                        if plan.is_update
+                        else f"adopt '{plan.container.name}' as service '{service}'"
+                    )
+                    + _note_suffix(note)
+                ),
                 snapshot=_adopt_snapshot(pull, plan.container.id, service, "adopt", batch=True),
             )
             results.append(
@@ -1144,7 +1151,8 @@ class Reconciler:
                 self.store.record_audit,
                 AuditAction.ADOPT_PR_OPENED,
                 record.ref,
-                f"batch deletion PR #{pull.number} {pull.url}",
+                f"PR #{pull.number} opened (batch of {count}): remove service '{service}'"
+                + _note_suffix(note),
                 snapshot=_adopt_snapshot(pull, key, service, "remove", batch=True),
             )
             results.append(
@@ -1177,9 +1185,6 @@ class Reconciler:
             except YAMLMutationError as exc:
                 raise AdoptionError(str(exc)) from exc
 
-        await asyncio.to_thread(
-            self.store.record_audit, AuditAction.ADOPT_REQUESTED, record.ref, note or record.message
-        )
         lines = [
             "## DriftWarden Reverse-GitOps adoption (deletion)",
             "",
@@ -1225,7 +1230,8 @@ class Reconciler:
             self.store.record_audit,
             AuditAction.ADOPT_PR_OPENED,
             record.ref,
-            f"deletion PR #{pull.number} {pull.url}{' (reused open PR)' if pull.reused else ''}",
+            f"PR #{pull.number} {'reused' if pull.reused else 'opened'}: "
+            f"remove service '{service_name}'{_note_suffix(note)}",
             snapshot=_adopt_snapshot(pull, buffer_key, service_name, "remove", batch=False),
         )
         self.schedule_reconcile("adopt-deletion")
@@ -1664,6 +1670,24 @@ class Reconciler:
     def pending(self) -> list[PendingAdoption]:
         """Active adoption buffer entries."""
         return list(self._pending.values())
+
+
+def _note_suffix(note: str | None) -> str:
+    """Operator note appended to an audit detail, when one was given."""
+    return f"; note: {note.strip()}" if note and note.strip() else ""
+
+
+def _merged_details(pending: PendingAdoption) -> str:
+    """Concise audit text for an adoption the baseline now reflects."""
+    if pending.kind == "remove":
+        tail = f"service '{pending.service_name}' is removed from baseline"
+    else:
+        tail = f"service '{pending.service_name}' is now tracked in baseline"
+    if pending.pr_number is None:
+        return f"Baseline updated; {tail}"
+    if pending.pr_state == "merged":
+        return f"PR #{pending.pr_number} merged; {tail}"
+    return f"Baseline updated while PR #{pending.pr_number} was {pending.pr_state}; {tail}"
 
 
 def _adopt_snapshot(

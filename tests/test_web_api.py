@@ -297,3 +297,46 @@ def test_reverse_endpoint_and_events_button(client: TestClient) -> None:
     assert client.post("/api/audit/999999/reverse").status_code == 409
     page = client.get("/events").text
     assert "Already reversed by #" in page and "reversal_completed" in page
+
+
+def test_audit_meta_covers_every_action() -> None:
+    from shared.constants import AuditAction
+    from web.routes.views import AUDIT_CATEGORIES, AUDIT_META
+
+    keys = {key for key, _ in AUDIT_CATEGORIES}
+    assert set(AUDIT_META) == {action.value for action in AuditAction}
+    assert all(meta["category"] in keys - {"all"} for meta in AUDIT_META.values())
+
+
+def test_pr_links_escape_and_link() -> None:
+    from web.routes.views import pr_links, pull_base_url
+
+    base = pull_base_url("owner/infra", mock=False)
+    assert base == "https://github.com/owner/infra/pull/"
+    assert pull_base_url("owner/infra", mock=True) is None and pull_base_url(None, False) is None
+    html = str(pr_links("PR #38 merged; service '<web>' is tracked", base))
+    assert (
+        '<a class="text-indigo-300 hover:underline" href="https://github.com/owner/infra/pull/38" '
+        'target="_blank" rel="noopener noreferrer">PR #38</a>' in html
+    )
+    assert "&lt;web&gt;" in html and "<web>" not in html
+    legacy = str(pr_links("batch PR #7 https://github.com/owner/infra/pull/7", base))
+    assert legacy.count("https://github.com/owner/infra/pull/7") == 1  # raw URL folded in
+    assert str(pr_links("PR #7 opened", None)) == "PR #7 opened"
+    assert str(pr_links(None, base)) == ""
+
+
+def test_events_page_badges_and_filters(client: TestClient) -> None:
+    assert client.post("/api/actions/kill/rogue-db").status_code == 200
+    page = client.get("/events").text
+    for key, label in (
+        ("all", "All"),
+        ("actions", "Actions"),
+        ("detections", "Detections"),
+        ("reversals", "Reversals"),
+    ):
+        assert f'data-audit-filter="{key}"' in page and f">{label} <span" in page
+    assert 'title="enforce_kill">Enforced (Removed)</span>' in page
+    assert 'title="rogue_detected">Rogue Detected</span>' in page
+    assert 'data-category="actions"' in page and 'data-category="detections"' in page
+    assert "break-all" not in page  # names wrap instead of being cut mid-way

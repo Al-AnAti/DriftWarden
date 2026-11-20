@@ -778,6 +778,21 @@
     };
 
     /* Events Log: undo an Enforce or Adopt recorded in the audit log. */
+    /* Events Log: show one category of audit rows (All / Actions / Detections / Reversals). */
+    window.wardenFilterAudit = function (category) {
+        document.querySelectorAll("[data-audit-filter]").forEach(function (pill) {
+            pill.setAttribute("aria-pressed", pill.dataset.auditFilter === category ? "true" : "false");
+        });
+        let shown = 0;
+        document.querySelectorAll("#audit-table tbody tr[data-category]").forEach(function (row) {
+            const visible = category === "all" || row.dataset.category === category;
+            row.hidden = !visible;
+            if (visible) shown += 1;
+        });
+        const empty = document.getElementById("audit-filter-empty");
+        if (empty) empty.hidden = shown > 0 || document.querySelectorAll("#audit-table tbody tr[data-category]").length === 0;
+    };
+
     window.wardenReverse = async function (id, action, target, warning) {
         const what = action === "adopt_pr_opened"
             ? "close the adoption pull request, delete its branch and return the workload(s) to their live drift state"

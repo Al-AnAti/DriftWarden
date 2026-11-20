@@ -37,24 +37,30 @@
     </section>
 
     <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-        <header class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+        <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap gap-3 justify-between items-center">
             <h2 class="font-semibold">Audit log</h2>
-            <span class="text-xs text-slate-500">{{ audit | length }} shown</span>
+            <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter the audit log">
+                {% for key, label in audit_categories %}
+                <button type="button" class="filter-pill" data-audit-filter="{{ key }}" aria-pressed="{{ 'true' if key == 'all' else 'false' }}" onclick="wardenFilterAudit('{{ key }}')">{{ label }} <span class="count">{{ audit_counts[key] }}</span></button>
+                {% endfor %}
+            </div>
         </header>
-        <table class="min-w-full text-sm">
+        <div class="overflow-x-auto">
+        <table class="min-w-full text-sm" id="audit-table">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-6 py-2">#</th><th class="text-left px-6 py-2">When (UTC)</th><th class="text-left px-6 py-2">Action</th><th class="text-left px-6 py-2">Target</th><th class="text-left px-6 py-2">Host</th><th class="text-left px-6 py-2">Details</th><th class="text-right px-6 py-2"></th></tr>
+                <tr><th class="text-left px-4 py-2">#</th><th class="text-left px-4 py-2">When (UTC)</th><th class="text-left px-4 py-2">Action</th><th class="text-left px-4 py-2">Target</th><th class="text-left px-4 py-2">Host</th><th class="text-left px-4 py-2">Details</th><th class="text-right px-4 py-2"></th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
                 {% for a in audit %}
-                <tr id="audit-{{ a.id }}">
-                    <td class="px-6 py-2 font-mono text-xs text-slate-500">{{ a.id }}</td>
-                    <td class="px-6 py-2 font-mono text-xs text-slate-400 whitespace-nowrap">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-6 py-2 font-mono text-xs {% if 'failed' in a.action.value or a.action.value == 'reversal_refused' %}text-rose-300{% elif 'detected' in a.action.value %}text-amber-300{% elif a.action.value in ('revert_completed', 'adopt_pr_opened', 'state_restored', 'reversal_completed') %}text-emerald-300{% else %}text-slate-300{% endif %}">{{ a.action.value }}{% if a.reverses_id %} <a class="text-indigo-300 hover:underline" href="#audit-{{ a.reverses_id }}">&rarr; #{{ a.reverses_id }}</a>{% endif %}</td>
-                    <td class="px-6 py-2 font-mono text-xs">{{ a.target }}</td>
-                    <td class="px-6 py-2 font-mono text-xs text-slate-500">{{ a.hostname or '' }}</td>
-                    <td class="px-6 py-2 text-xs text-slate-400 break-all">{{ a.details or '' }}</td>
-                    <td class="px-6 py-2 text-right whitespace-nowrap">
+                {% set meta = audit_meta[a.action.value] %}
+                <tr id="audit-{{ a.id }}" data-category="{{ meta.category }}">
+                    <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top">{{ a.id }}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-slate-400 whitespace-nowrap align-top">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-4 py-2 align-top whitespace-nowrap"><span class="badge tone-{{ meta.tone }}" title="{{ a.action.value }}">{{ meta.label }}</span>{% if a.reverses_id %} <a class="text-xs text-indigo-300 hover:underline" href="#audit-{{ a.reverses_id }}">of #{{ a.reverses_id }}</a>{% endif %}</td>
+                    <td class="px-4 py-2 font-mono text-xs align-top wrap-anywhere min-w-[10rem]">{{ a.target }}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top wrap-anywhere">{{ a.hostname or '' }}</td>
+                    <td class="px-4 py-2 text-xs text-slate-300 align-top wrap-anywhere min-w-[16rem]">{{ a.details | pr_links(pr_base_url) }}</td>
+                    <td class="px-4 py-2 text-right whitespace-nowrap align-top">
                         {% if a.action.value in reversible_actions %}
                         <button type="button" class="btn btn-ghost disabled:opacity-40 disabled:cursor-not-allowed"
                             {% if a.reversible %}onclick='wardenReverse({{ a.id }}, {{ a.action.value | tojson }}, {{ a.target | tojson }}, {{ (a.reversal_warning or "") | tojson }})' title="Undo this action"{% else %}disabled title="{{ a.not_reversible_reason }}"{% endif %}>&#8630; Reverse</button>
@@ -65,8 +71,10 @@
                 {% else %}
                 <tr><td colspan="7" class="px-6 py-8 text-center text-slate-500">No audit rows yet.</td></tr>
                 {% endfor %}
+                <tr id="audit-filter-empty" hidden><td colspan="7" class="px-6 py-8 text-center text-slate-500">No rows in this category.</td></tr>
             </tbody>
         </table>
+        </div>
     </section>
 </div>
 {% endblock %}

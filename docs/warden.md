@@ -303,12 +303,13 @@ wrapped so an exception is logged and the loop continues.
   (`GitBaselineFetchError`, `BaselineParseError`, `ConfigurationError`, `OSError`) keep the
   last known baseline, set `baseline_error` (shown in the amber "poll failing" banner) and
   write one `BASELINE_FETCH_FAILED` audit row per distinct message.
-* `_install_baseline` swaps the baseline in only when the SHA changed, records
-  `BASELINE_FETCHED`, and stamps `_baseline_changed_at` which starts the **enforcement grace
+* `_install_baseline` swaps the baseline in only when the SHA changed, logs it (no audit
+  row), and stamps `_baseline_changed_at` which starts the **enforcement grace
   window**.
 * `_on_baseline_changed` clears buffer entries the new baseline satisfies (an `adopt` entry
-  whose service is now declared, a `remove` entry whose service is now gone) with
-  `ADOPTION_CLEARED`, then schedules a reconcile.
+  whose service is now declared, a `remove` entry whose service is now gone) with one
+  `ADOPTION_MERGED` row each (`PR #38 merged; service 'rogue-web' is now tracked in
+  baseline`), then schedules a reconcile.
 * `baseline_info()` builds the `BaselineInfo` for snapshots.
 
 ### The event loop and debounce
@@ -337,9 +338,9 @@ Under `_cycle_lock` (cycles never overlap):
 3. `evaluate(containers, self._context())` in a thread (it may touch Docker for image lookups,
    which are cached per image id).
 4. Build the `HostSnapshot`, compute `transitions`, `projector.publish`.
-5. `_persist_transitions` — one `drift_events` row per transition, plus an audit row:
-   `ROGUE_DETECTED` / `DRIFT_DETECTED` / `MISSING_DETECTED` for problems, `STATE_RESTORED`
-   when an entry returns to `MATCHED`.
+5. `_persist_transitions` — one `drift_events` row per transition, plus an audit row
+   (`ROGUE_DETECTED` / `DRIFT_DETECTED` / `MISSING_DETECTED`) when an entry becomes a problem.
+   A return to `MATCHED` is a transition only (and an application log line).
 
 Then, outside the lock: if `enforcement_active` and the trigger is neither `startup` nor
 `post-enforce`, run `_enforce(snapshot)`; if it acted, schedule `reconcile("post-enforce")` so
@@ -369,7 +370,7 @@ All of these take a `ref` and resolve it with `HostSnapshot.find`. They raise
 
 | Method | Applies to | What happens |
 | --- | --- | --- |
-| `revert(ref)` | DRIFTED or MISSING managed service (not PENDING_ADOPTION) | Audit `REVERT_REQUESTED`; remember the action; if the live container has a different name than the target, remove it; `watcher.recreate` from the baseline service; audit `REVERT_COMPLETED` or `REVERT_FAILED`; schedule `reconcile("revert")`. |
+| `revert(ref)` | DRIFTED or MISSING managed service (not PENDING_ADOPTION) | Remember the action; if the live container has a different name than the target, remove it; `watcher.recreate` from the baseline service; audit `REVERT_COMPLETED` or `REVERT_FAILED`; schedule `reconcile("revert")`. |
 | `kill(ref)` | ROGUE (or a MISSING entry that still has a stopped container) | Remember; `stop_and_remove`; audit `ENFORCE_KILL` / `ENFORCE_KILL_FAILED`; reconcile. |
 | `adopt(ref, note)` | ROGUE or DRIFTED | See below. |
 | `adopt_deletion(ref, note)` | MISSING | Opens a PR that deletes the service block; buffers under `service:<name>` with `kind="remove"`. |
@@ -387,13 +388,15 @@ All of these take a `ref` and resolve it with `HostSnapshot.find`. They raise
    changed fields) and false for ROGUE (add a new service).
 2. A `mutate(latest_text)` closure applies `update_service` or `add_service` to whatever the
    file contains on GitHub at that moment.
-3. Audit `ADOPT_REQUESTED`; build the title (`warden: adopt <container> as service <name>` /
+3. Build the title (`warden: adopt <container> as service <name>` /
    `warden: sync <service> with live container <name>`) and the Markdown body (`_pr_body`:
    host, container, image, state, synced fields with `expected → observed`, the `${KEY}`
    list, the operator note).
 4. `github.open_adoption_pr(...)`. An open PR for the same container is reused.
 5. `store.add_pending(...)` with the PR number, URL and branch; the entry goes into
-   `_pending`; audit `ADOPT_PR_OPENED`; reconcile. The entry now shows as `PENDING_ADOPTION`.
+   `_pending`; audit `ADOPT_PR_OPENED` (`PR #38 opened: adopt 'x' as service 'x'`, plus the
+   operator note) or, if GitHub refused, `ADOPT_FAILED`; reconcile. The entry now shows as
+   `PENDING_ADOPTION`.
 
 **Adopt All (`adopt_all`)** — every target of the batch (rogue → add, drifted → sync,
 missing → remove) is applied in **one** `mutate` closure on **one** branch
@@ -405,7 +408,7 @@ target gets a failed `ActionResult` and nothing is buffered. Mock mode refuses t
 
 | Trigger | Outcome column | Audit | Result |
 | --- | --- | --- | --- |
-| `poll_pull_requests` sees the PR **merged** | `pr_merged` / `baseline_updated` | `ADOPTION_MERGED`, then `ADOPTION_CLEARED` once the re-fetched baseline declares (or no longer declares) the service | entry gone, workload `MATCHED` |
+| `poll_pull_requests` sees the PR **merged** | `pr_merged` / `baseline_updated` | one `ADOPTION_MERGED` row once the re-fetched baseline declares (or no longer declares) the service | entry gone, workload `AWAITING_RESTART` (rogue) or `MATCHED` |
 | `poll_pull_requests` sees the PR **closed** unmerged | `pr_closed` | `ADOPTION_CLOSED` | entry gone, workload back to ROGUE / DRIFTED / MISSING |
 | operator clicks **Revoke Buffer** (`revoke_adoption`) | `revoked` | `ADOPTION_REVOKED` per entry | the PR is commented on and closed; **every** entry sharing that PR number is evicted (a batch PR revokes the whole batch); if GitHub refuses to close the PR the entries are evicted anyway and the audit row says so |
 | `_expire_pending` safety TTL | `expired` | `ADOPTION_EXPIRED` | only for entries with **no** PR number (`expires_at` passed) or whose PR has been **unreachable** for `ADOPTION_BUFFER_TTL_SECONDS`; an entry with a reachable open PR never expires, however long review takes |

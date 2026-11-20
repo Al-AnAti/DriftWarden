@@ -108,7 +108,9 @@ class StateStore(Protocol):
         previous_status: DriftStatus | None,
         service_name: str | None,
         container_name: str | None,
-        details: str | None,
+        trigger: str | None = None,
+        reason: str | None = None,
+        details: str | None = None,
     ) -> None:
-        """Persist a status transition."""
+        """Persist a status transition with its cause and concise reason."""
         ...

@@ -44,6 +44,12 @@ AWAITING_RESTART_MESSAGE = (
 )
 """Finding shown for an adopted workload that only lacks Compose networking or labels."""
 
+AWAITING_RESTART_REASON = "Declared in baseline; missing Compose ownership labels"
+"""Transition reason for an adopted workload that still runs without Compose labels."""
+
+MATCHED_REASON = "All fields match baseline"
+"""Transition reason for an entry that matches its baseline service."""
+
 LEGACY_NETWORKS: frozenset[str] = frozenset({"bridge"})
 """Docker's default networks a `docker run` container lands on."""
 
@@ -462,6 +468,7 @@ def _rogue_record(
             f"SHADOW IT: rogue process '{container.name}' is running on {context.hostname} "
             f"but was not found in the Git repository ({reason})."
         ),
+        reason=f"Not in baseline ({reason})",
         actions=actions,
         detected_at=now,
     )
@@ -486,6 +493,7 @@ def _managed_record(
                 f"Service '{service.service_name}' is buffered while deletion PR "
                 f"#{removal.pr_number} deploys."
             )
+            reason = f"Deletion PR #{removal.pr_number} open"
             actions: list[str] = []
         else:
             status = DriftStatus.MISSING
@@ -493,6 +501,7 @@ def _managed_record(
                 f"Service '{service.service_name}' is declared in Git but no container "
                 f"is running on {context.hostname}."
             )
+            reason = "Container not running on host"
             actions = ["revert", "adopt_deletion"]
         return DriftRecord(
             ref=service.service_name,
@@ -506,6 +515,7 @@ def _managed_record(
             expected_yaml=expected_yaml,
             observed_yaml=None,
             message=message,
+            reason=reason,
             actions=actions,
             detected_at=now,
             pending_adoption=removal,
@@ -523,16 +533,19 @@ def _managed_record(
             f"Container '{container.name}' for service '{service.service_name}' "
             f"is {container.state}; no running instance on {context.hostname}."
         )
+        reason = f"Container {container.state}; not running on host"
         actions = ["revert", "adopt_deletion"]
     elif pending is not None:
         status = DriftStatus.PENDING_ADOPTION
         message = f"'{container.name}' is buffered while adoption PR #{pending.pr_number} deploys."
+        reason = f"Adoption PR #{pending.pr_number} open"
         actions = []
     elif awaiting_restart or (
         container.id in context.adopted and _only_legacy_network_drift(changed, container)
     ):
         status = DriftStatus.AWAITING_RESTART
         message = AWAITING_RESTART_MESSAGE
+        reason = AWAITING_RESTART_REASON
         actions = ["revert"]
     elif changed:
         status = DriftStatus.DRIFTED
@@ -540,10 +553,12 @@ def _managed_record(
             f"DRIFT: '{container.name}' differs from baseline service '{service.service_name}' "
             f"on {', '.join(changed)}."
         )
+        reason = f"Changed: {', '.join(changed)}"
         actions = ["revert", "adopt"]
     else:
         status = DriftStatus.MATCHED
         message = f"'{container.name}' matches baseline service '{service.service_name}'."
+        reason = MATCHED_REASON
         actions = []
     return DriftRecord(
         ref=container.name,
@@ -559,6 +574,7 @@ def _managed_record(
         expected_yaml=expected_yaml,
         observed_yaml=observed_yaml,
         message=message,
+        reason=reason,
         actions=actions,
         detected_at=now,
         pending_adoption=pending,
@@ -676,6 +692,7 @@ def evaluate(containers: list[LiveContainer], context: EvaluationContext) -> Eva
                         f"'{container.name}' is buffered while adoption PR "
                         f"#{pending.pr_number} deploys."
                     ),
+                    "reason": f"Adoption PR #{pending.pr_number} open",
                 }
             )
         records.append(record)

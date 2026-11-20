@@ -244,7 +244,15 @@ The in-memory home of the latest `HostSnapshot` and the fan-out point for live u
 * `record_key(record)` — the identity used to compare cycles: `service:<name>` for managed
   entries, `container:<id>` for rogue ones.
 * `transitions(new)` — records whose status differs from the previous snapshot, as
-  `(record, previous_status)` pairs; brand-new entries count only if they are not `MATCHED`.
+  `Transition(record, previous)` pairs; brand-new entries count only if they are not `MATCHED`.
+  When the key finds nothing, the previous record with the same container id is used (if its
+  own key is gone), so an adopted rogue whose key moves from `container:<id>` to
+  `service:<name>` keeps its history: `PENDING_ADOPTION → AWAITING_RESTART`, not a new entry.
+* `transition_trigger(trigger, change)` — the short cause stored with each transition: the
+  buffer is named from the records (`Adopt PR #38 Opened`, `Baseline Updated (PR #38)`,
+  `Adopt PR #38 Closed`, `Adoption Revoked (PR #38)`), everything else from the reconcile
+  trigger (`Poller Evaluation`, `Docker Event`, `Engine Startup`, `Enforce Recreate`,
+  `Enforce Remove`, `Action Reversed` ...).
 * `publish(snapshot, transitions)` — swaps the snapshot, bumps `version`, and puts one JSON
   message (`{"version", "snapshot", "transitions"}`) on every subscriber queue. Queues hold
   32 messages; a slow browser just loses updates rather than blocking the engine.
@@ -338,7 +346,8 @@ Under `_cycle_lock` (cycles never overlap):
 3. `evaluate(containers, self._context())` in a thread (it may touch Docker for image lookups,
    which are cached per image id).
 4. Build the `HostSnapshot`, compute `transitions`, `projector.publish`.
-5. `_persist_transitions` — one `drift_events` row per transition, plus an audit row
+5. `_persist_transitions` — one `drift_events` row per transition (from, to, the trigger
+   label and the record's concise `reason`, never the prose message), plus an audit row
    (`ROGUE_DETECTED` / `DRIFT_DETECTED` / `MISSING_DETECTED`) when an entry becomes a problem.
    A return to `MATCHED` is a transition only (and an application log line).
 

@@ -64,6 +64,14 @@ class Database:
                 if audit_columns and column not in audit_columns:
                     connection.exec_driver_sql(f"ALTER TABLE audit_log ADD COLUMN {column} {ddl}")
                     logger.info("Migrated audit_log: added {} column", column)
+            rows = connection.exec_driver_sql("PRAGMA table_info(drift_events)").fetchall()
+            event_columns = {str(row[1]) for row in rows}
+            for column, ddl in {"trigger": "VARCHAR(64)", "reason": "TEXT"}.items():
+                if event_columns and column not in event_columns:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE drift_events ADD COLUMN {column} {ddl}"
+                    )
+                    logger.info("Migrated drift_events: added {} column", column)
 
     @contextmanager
     def session(self) -> Iterator[Session]:

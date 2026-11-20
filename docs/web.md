@@ -92,7 +92,7 @@ instead of poking at `request.app.state` with strings. If the lifespan did not r
 | `audit_log` | `AuditLogRow` | `id`, `action` (an `AuditAction` value), `target`, `details`, `hostname`, `timestamp` | `Store.record_audit` (engine and routes) |
 | `pending_adoptions` | `PendingAdoptionRow` | `id`, `kind`, `pr_state`, `container_id`, `container_name`, `service_name`, `pr_number`, `pr_url`, `branch`, `created_at`, `expires_at`, `cleared_at`, `outcome` | adoption paths; an entry is "active" while `cleared_at IS NULL` |
 | `whitelisted_entities` | `WhitelistedEntityRow` | `id`, `target_type`, `target_identifier`, `reason`, `created_at`; unique on (`target_type`, `target_identifier`) | whitelist routes |
-| `drift_events` | `DriftEventRow` | `id`, `ref`, `drift_status`, `previous_status`, `service_name`, `container_name`, `details`, `hostname`, `detected_at` | `_persist_transitions` after every cycle |
+| `drift_events` | `DriftEventRow` | `id`, `ref`, `drift_status`, `previous_status`, `service_name`, `container_name`, `trigger`, `reason`, `details` (legacy prose, empty on new rows), `hostname`, `detected_at` | `_persist_transitions` after every cycle |
 | `setting_overrides` | `SettingOverrideRow` | `key` (primary), `value`, `updated_at` | Cluster Config saves |
 
 Timestamps are `DateTime(timezone=True)` and always UTC. SQLite drops the timezone on read,
@@ -193,7 +193,7 @@ data: {"version": 13, "snapshot": {...}, "transitions": [...]}   ← after every
 : keepalive                                          ← every 15 s of silence
 ```
 
-`transitions` lists `{ref, display_name, status, previous, message}` for entries whose status
+`transitions` lists `{ref, display_name, status, previous, message, reason}` for entries whose status
 changed. The generator checks `request.is_disconnected()` on every keepalive and unsubscribes
 in a `finally`, so closed tabs do not leak queues. Response headers disable caching and
 proxy buffering (`X-Accel-Buffering: no`).
@@ -219,7 +219,7 @@ All pages extend `base.html`, which provides:
 | --- | --- |
 | `dashboard.html` | Headline with baseline project / source / SHA and the live indicator; **Enforce All**, **Adopt All**, **🔄 Refresh** buttons; six counters (one per status plus Enforcement: *Manual only*, *Grace window* or *Armed*); the live table (status badge, container with the 12-char id or the hint *declared in Git, not running*, service or `project: x`, image, Docker state, finding = changed fields or message, and the action buttons the record allows); a collapsible list of exempt containers. |
 | `diff.html` | Header badges; a banner per status (SHADOW IT, DRIFT, MISSING, PENDING ADOPTION with the PR link, MATCHED); the **Git Baseline** pane and, unless the entry is MISSING, the **Live Observed State** pane, each with a line-number and sign gutter; the field-by-field table (changed rows highlighted with ✱); the large action buttons with one-line explanations: *Enforce Baseline (Rollback)* or *Enforce (Spin Up)*, *Adopt Deletion (Auto-PR)*, *Enforce Kill*, *Adopt into Git (Auto-PR)*, *Whitelist container*, *Whitelist project*. A MISSING entry gets a single-column layout with only the baseline pane. |
-| `events.html` | 🔄 Refresh; the drift transitions table (time, entry link, `previous → current` badges, details); the audit log table with filter pills (All, Actions, Detections, Reversals) and per row: id, time, action badge (`AUDIT_META`), target, host, details with every `PR #N` linked to GitHub in a new tab (the `pr_links` filter; plain text in mock mode), and the **Reverse** button. Long names and messages wrap instead of being clipped. |
+| `events.html` | 🔄 Refresh; the drift transitions table (time, entry link, *from → to* status pills with *New* for a first sighting, trigger, concise reason; older rows show their legacy text as the reason); the audit log table with filter pills (All, Actions, Detections, Reversals) and per row: id, time, action badge (`AUDIT_META`), target, host, details with every `PR #N` linked to GitHub in a new tab (the `pr_links` filter; plain text in mock mode), and the **Reverse** button. Long names and messages wrap instead of being clipped. |
 | `buffer.html` | Explanation of the buffer and the TTL rule; a four-step strip (drift → Adopt → buffered → merged); active entries (entry, kind `adopt` / `remove service`, service, PR link + branch, PR state coloured, created, **Revoke Buffer**); history with outcomes (`baseline_updated`, `pr_merged`, `expired`, `pr_closed`, `revoked`, `superseded`, or `active`). |
 | `config.html` | **Runtime settings** rows (label, env var, widget by `kind`, help, `override` badge, Save, Reset); the effective configuration list; the raw baseline YAML with SHA and check time; the whitelist card with an add form (type, identifier, reason) and per-entry **Revoke**; four database count tiles. |
 

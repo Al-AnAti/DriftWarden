@@ -198,7 +198,8 @@ dashboard works from `DriftRecord`.
 | `container_id`, `container_name`, `image`, `status` | From Docker; `status` is the Docker state (`running`, `exited`, ...) or `absent` for MISSING. |
 | `diffs` | A list of `FieldDiff`; empty for rogue containers. |
 | `expected_yaml`, `observed_yaml` | The two panes of the diff page, already rendered as YAML text. Either may be `None`. |
-| `message` | One human sentence, also written to `drift_events.details`. |
+| `message` | One human sentence for the dashboard, diff page and detection audit rows. |
+| `reason` | Concise technical reason written to `drift_events.reason`: `Changed: image, ports`, `Container not running on host`, `Declared in baseline; missing Compose ownership labels`, `All fields match baseline`, `Not in baseline (...)`, `Adoption PR #38 open`. |
 | `actions` | Which operator buttons apply: any of `revert`, `kill`, `adopt`, `adopt_deletion`, `whitelist`, `whitelist_project`. The templates and `dashboard.js` only render a button when its name is in this list. |
 | `detected_at` | When the record was computed. |
 | `pending_adoption` | The buffer entry while the status is `PENDING_ADOPTION`. |

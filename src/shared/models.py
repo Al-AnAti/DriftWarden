@@ -208,6 +208,8 @@ class DriftRecord(BaseModel):
         expected_yaml: Baseline service definition rendered as YAML.
         observed_yaml: Live container rendered as an equivalent Compose service.
         message: One-line human summary of the finding.
+        reason: Concise technical reason for the status (``Changed: image, ports``,
+            ``Container not running on host`` ...), shown in the drift transitions.
         actions: Operator actions that apply to this entry.
         detected_at: When this state was last computed.
         pending_adoption: Buffer entry while an adoption PR deploys.
@@ -228,6 +230,7 @@ class DriftRecord(BaseModel):
     expected_yaml: str | None = None
     observed_yaml: str | None = None
     message: str = ""
+    reason: str = ""
     actions: list[str] = Field(default_factory=list)
     detected_at: AwareDatetime
     pending_adoption: PendingAdoption | None = None

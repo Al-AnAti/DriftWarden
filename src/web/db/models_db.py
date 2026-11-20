@@ -82,6 +82,11 @@ class DriftEventRow(Base):
     service_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     container_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Legacy prose copied from the finding; new rows use ``trigger`` and ``reason``."""
+    trigger: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    """What caused the change: ``Poller Evaluation``, ``Baseline Updated (PR #38)`` ..."""
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Concise technical reason: ``Changed: image``, ``All fields match baseline`` ..."""
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True

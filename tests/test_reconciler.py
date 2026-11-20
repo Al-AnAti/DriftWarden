@@ -800,3 +800,73 @@ async def test_merged_adoption_binds_to_the_inspected_instance(
         )
     finally:
         await reconciler.stop()
+
+
+async def test_merged_adoption_keeps_transition_continuity(
+    monkeypatch: pytest.MonkeyPatch, fixture_yaml: str, rogue_container: LiveContainer
+) -> None:
+    monkeypatch.setenv("ALLOW_MOCK_BASELINE", "false")
+    monkeypatch.setenv("GITHUB_PAT", "ghp_test")
+    monkeypatch.setenv("TARGET_REPO", "owner/infra")
+    monkeypatch.setenv("TARGET_BRANCH", "main")
+    settings = WardenSettings(_env_file=None)  # type: ignore[call-arg]
+    watcher = FakeWatcher(settings)
+    watcher.containers = [rogue_container]
+    github = FakeGitHub(fixture_yaml)
+    reconciler, store = build(settings, watcher, github)
+    await reconciler.start()
+    try:
+        await reconciler.reconcile("sweep")
+        await reconciler.adopt("rogue-db")
+        await reconciler.reconcile("adopt")
+        github.content = github.mutated or ""
+        github.sha = "sha-merged"
+        github.pr_states[1] = "merged"
+        await reconciler.poll_pull_requests()
+        await asyncio.sleep(0.1)
+        await reconciler.reconcile("sweep")
+        record = reconciler.projector.snapshot.find("rogue-db")
+        assert record is not None and record.drift_status is DriftStatus.AWAITING_RESTART
+
+        rows = [e for e in store.list_drift_events() if e["ref"] == "rogue-db"]
+        timeline = [(e["previous_status"], e["drift_status"], e["trigger"]) for e in rows][::-1]
+        assert timeline == [
+            (None, "rogue", "Engine Startup"),
+            ("rogue", "pending_adoption", "Adopt PR #1 Opened"),
+            ("pending_adoption", "awaiting_restart", "Baseline Updated (PR #1)"),
+        ]
+        reasons = [e["reason"] for e in rows][::-1]
+        assert reasons == [
+            "Not in baseline (no Compose project labels)",
+            "Adoption PR #1 open",
+            "Declared in baseline; missing Compose ownership labels",
+        ]
+        assert all(e["details"] is None for e in rows)  # no prose copied from the audit log
+    finally:
+        await reconciler.stop()
+
+
+async def test_transition_reasons_and_triggers(
+    started: tuple[Reconciler, Store, FakeWatcher], drifted_cache: LiveContainer
+) -> None:
+    reconciler, store, watcher = started
+    watcher.containers = [drifted_cache]  # web gone, cache spoofed
+    await reconciler.reconcile("sweep")
+    rows = {e["ref"]: e for e in store.list_drift_events()}
+    cache = rows[drifted_cache.name]
+    assert (cache["previous_status"], cache["drift_status"]) == ("matched", "drifted")
+    assert cache["trigger"] == "Poller Evaluation"
+    reason = str(cache["reason"])
+    assert reason.startswith("Changed: ") and "image" in reason
+    web = rows["web"]
+    assert (web["previous_status"], web["drift_status"]) == ("matched", "missing")
+    assert web["reason"] == "Container not running on host"
+
+    watcher.on_recreate = container_from_service
+    await reconciler.revert("web")
+    await reconciler.reconcile("revert")
+    latest = store.list_drift_events()[0]
+    assert latest["service_name"] == "web" and latest["drift_status"] == "matched"
+    assert latest["previous_status"] == "missing"
+    assert latest["trigger"] == "Enforce Recreate"
+    assert latest["reason"] == "All fields match baseline"

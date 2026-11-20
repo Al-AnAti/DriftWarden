@@ -340,3 +340,13 @@ def test_events_page_badges_and_filters(client: TestClient) -> None:
     assert 'title="rogue_detected">Rogue Detected</span>' in page
     assert 'data-category="actions"' in page and 'data-category="detections"' in page
     assert "break-all" not in page  # names wrap instead of being cut mid-way
+
+
+def test_events_page_transition_columns(client: TestClient) -> None:
+    page = client.get("/events").text
+    assert "From &rarr; To" in page and ">Trigger</th>" in page and ">Reason</th>" in page
+    assert ">Engine Startup</td>" in page
+    assert "Not in baseline (no Compose project labels)" in page
+    assert "SHADOW IT" not in page.split("Audit log")[0]  # no prose in the timeline
+    events = client.get("/api/events").json()
+    assert all(e["trigger"] and e["reason"] for e in events)

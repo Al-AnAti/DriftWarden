@@ -77,7 +77,7 @@ from warden.engine.diff_engine import (
     observed_service,
     project_networks,
 )
-from warden.engine.state_projector import StateProjector
+from warden.engine.state_projector import StateProjector, Transition, transition_trigger
 from warden.engine.store import StateStore
 
 ACTION_CACHE_TTL_SECONDS = 20.0
@@ -644,7 +644,7 @@ class Reconciler:
             )
             transitions = self.projector.transitions(snapshot)
             self.projector.publish(snapshot, transitions)
-            await asyncio.to_thread(self._persist_transitions, transitions)
+            await asyncio.to_thread(self._persist_transitions, transitions, trigger)
             logger.info(
                 "Reconcile ({}) {} containers -> {}",
                 trigger,
@@ -658,15 +658,14 @@ class Reconciler:
                 self.schedule_reconcile("post-enforce")
         return snapshot
 
-    def _persist_transitions(
-        self, transitions: list[tuple[DriftRecord, DriftStatus | None]]
-    ) -> None:
+    def _persist_transitions(self, transitions: list[Transition], trigger: str) -> None:
         detection_actions = {
             DriftStatus.ROGUE: AuditAction.ROGUE_DETECTED,
             DriftStatus.DRIFTED: AuditAction.DRIFT_DETECTED,
             DriftStatus.MISSING: AuditAction.MISSING_DETECTED,
         }
-        for record, previous in transitions:
+        for change in transitions:
+            record, previous = change.record, change.previous_status
             details = record.message
             if record.changed_fields:
                 details = f"{record.message} Changed: {', '.join(record.changed_fields)}."
@@ -676,7 +675,8 @@ class Reconciler:
                 previous_status=previous,
                 service_name=record.service_name,
                 container_name=record.container_name,
-                details=details,
+                trigger=transition_trigger(trigger, change),
+                reason=record.reason or None,
             )
             action = detection_actions.get(record.drift_status)
             if action is not None:

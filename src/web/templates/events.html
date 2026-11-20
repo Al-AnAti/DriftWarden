@@ -14,26 +14,30 @@
             <h2 class="font-semibold">Drift transitions</h2>
             <span class="text-xs text-slate-500">{{ events | length }} shown</span>
         </header>
+        <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-6 py-2">When (UTC)</th><th class="text-left px-6 py-2">Entry</th><th class="text-left px-6 py-2">Transition</th><th class="text-left px-6 py-2">Details</th></tr>
+                <tr><th class="text-left px-4 py-2">When (UTC)</th><th class="text-left px-4 py-2">Entry</th><th class="text-left px-4 py-2">From &rarr; To</th><th class="text-left px-4 py-2">Trigger</th><th class="text-left px-4 py-2">Reason</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
                 {% for e in events %}
                 <tr>
-                    <td class="px-6 py-2 font-mono text-xs text-slate-400 whitespace-nowrap">{{ e.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-6 py-2 font-mono"><a class="text-indigo-300 hover:underline" href="/diff/{{ e.ref }}">{{ e.ref }}</a></td>
-                    <td class="px-6 py-2 whitespace-nowrap">
-                        {% if e.previous_status %}<span class="badge tone-{{ status_meta[e.previous_status].tone }}">{{ status_meta[e.previous_status].label }}</span> &rarr; {% endif %}
+                    <td class="px-4 py-2 font-mono text-xs text-slate-400 whitespace-nowrap align-top">{{ e.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-4 py-2 font-mono text-xs align-top wrap-anywhere min-w-[10rem]"><a class="text-indigo-300 hover:underline" href="/diff/{{ e.ref }}">{{ e.ref }}</a></td>
+                    <td class="px-4 py-2 whitespace-nowrap align-top">
+                        {% if e.previous_status %}<span class="badge tone-{{ status_meta[e.previous_status].tone }}">{{ status_meta[e.previous_status].label }}</span>{% else %}<span class="badge tone-slate opacity-60" title="First seen">New</span>{% endif %}
+                        <span class="text-slate-500 px-1">&rarr;</span>
                         <span class="badge tone-{{ status_meta[e.drift_status].tone }}">{{ status_meta[e.drift_status].label }}</span>
                     </td>
-                    <td class="px-6 py-2 text-xs text-slate-400">{{ e.details or '' }}</td>
+                    <td class="px-4 py-2 text-xs text-slate-200 align-top min-w-[9rem]">{{ e.trigger or '—' }}</td>
+                    <td class="px-4 py-2 text-xs text-slate-400 align-top wrap-anywhere min-w-[14rem]">{{ e.reason or '' }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4" class="px-6 py-8 text-center text-slate-500">No transitions recorded yet.</td></tr>
+                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No transitions recorded yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </section>
 
     <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
@@ -58,7 +62,7 @@
                     <td class="px-4 py-2 font-mono text-xs text-slate-400 whitespace-nowrap align-top">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                     <td class="px-4 py-2 align-top whitespace-nowrap"><span class="badge tone-{{ meta.tone }}" title="{{ a.action.value }}">{{ meta.label }}</span>{% if a.reverses_id %} <a class="text-xs text-indigo-300 hover:underline" href="#audit-{{ a.reverses_id }}">of #{{ a.reverses_id }}</a>{% endif %}</td>
                     <td class="px-4 py-2 font-mono text-xs align-top wrap-anywhere min-w-[10rem]">{{ a.target }}</td>
-                    <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top wrap-anywhere">{{ a.hostname or '' }}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top whitespace-nowrap">{{ a.hostname or '' }}</td>
                     <td class="px-4 py-2 text-xs text-slate-300 align-top wrap-anywhere min-w-[16rem]">{{ a.details | pr_links(pr_base_url) }}</td>
                     <td class="px-4 py-2 text-right whitespace-nowrap align-top">
                         {% if a.action.value in reversible_actions %}

@@ -396,9 +396,22 @@ class Store:
         previous_status: DriftStatus | None,
         service_name: str | None,
         container_name: str | None,
-        details: str | None,
+        trigger: str | None = None,
+        reason: str | None = None,
+        details: str | None = None,
     ) -> None:
-        """Persist a status transition for the Events Log page."""
+        """Persist a status transition for the Events Log page.
+
+        Args:
+            ref: Entry key shown and linked in the timeline.
+            drift_status: Status after the change.
+            previous_status: Status before it, ``None`` for a new entry.
+            service_name: Baseline service, when the entry maps to one.
+            container_name: Live container, when one exists.
+            trigger: Short cause label (``Poller Evaluation`` ...).
+            reason: Concise technical reason (``Changed: image`` ...).
+            details: Legacy free text; new rows leave it empty.
+        """
         try:
             with self._db.write() as session:
                 session.add(
@@ -409,6 +422,8 @@ class Store:
                         service_name=service_name,
                         container_name=container_name,
                         details=details,
+                        trigger=trigger,
+                        reason=reason,
                         hostname=self._hostname,
                         detected_at=datetime.now(timezone.utc),
                     )
@@ -431,6 +446,8 @@ class Store:
                 "service_name": row.service_name,
                 "container_name": row.container_name,
                 "details": row.details,
+                "trigger": row.trigger,
+                "reason": row.reason or row.details,
                 "hostname": row.hostname,
                 "detected_at": _aware(row.detected_at),
             }

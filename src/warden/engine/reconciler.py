@@ -26,6 +26,7 @@ from shared.constants import (
     AuditAction,
     BaselineSource,
     DriftStatus,
+    EventResult,
     WhitelistTargetType,
 )
 from shared.exceptions import (
@@ -47,6 +48,7 @@ from shared.models import (
     BatchResult,
     DriftRecord,
     HostSnapshot,
+    ParsedService,
     PendingAdoption,
     RawDockerEvent,
     SettingUpdate,
@@ -77,19 +79,32 @@ from warden.engine.diff_engine import (
     observed_service,
     project_networks,
 )
+from warden.engine.event_details import (
+    enforce_details,
+    record_details,
+    removal_details,
+    verification_details,
+)
 from warden.engine.state_projector import (
+    TRIGGER_LABELS,
     StateProjector,
     Transition,
     record_key,
     transition_trigger,
 )
 from warden.engine.store import StateStore
+from warden.engine.verification import verify_recreated, verify_removed
 
 ACTION_CACHE_TTL_SECONDS = 20.0
 """How long a container id/name/action id stays in the self-action cache."""
 
 ENFORCEMENT_COOLDOWN_SECONDS = 60.0
 """Minimum time between two autonomous actions on the same entry (loop guard)."""
+
+AUTONOMOUS_SOURCE = "autonomous enforcement"
+MANUAL_SOURCE = "manual Enforce"
+BATCH_SOURCE = "batch Enforce"
+"""``trigger_source`` values written into the details of Enforce rows."""
 
 
 @dataclass(slots=True)
@@ -208,6 +223,11 @@ class Reconciler:
         # reversal carries over to the container it brings back (by container name).
         self._incidents: dict[str, str] = {}
         self._carried_incidents: dict[str, str] = {}
+        # Entries Enforce is working on right now, by projector record key. While a
+        # key is held, reconcile cycles keep showing the entry as it was when the
+        # action started, so the stop/remove/create steps of one Enforce never surface
+        # as a false MISSING transition or a duplicate detection.
+        self._remediating: dict[str, DriftRecord] = {}
         self._overrides: dict[str, str] = {}
         self._environment_defaults: dict[str, object] = {}
         self._whitelist = WhitelistIndex()
@@ -654,7 +674,9 @@ class Reconciler:
                 docker_connected=self.docker_connected,
                 docker_error=self.docker_error,
                 baseline=self.baseline_info(),
-                records=evaluation.records if self.docker_connected else [],
+                records=self._hold_remediations(evaluation.records)
+                if self.docker_connected
+                else [],
                 exempt=evaluation.exempt,
             )
             transitions = self.projector.transitions(snapshot)
@@ -677,31 +699,63 @@ class Reconciler:
                 self.schedule_reconcile("post-enforce")
         return snapshot
 
+    def _hold_remediations(self, records: list[DriftRecord]) -> list[DriftRecord]:
+        """Keep entries Enforce is acting on as they were when the action started.
+
+        Between the removal of the old container and the start of the new one the
+        host really is missing the service, but that state is DriftWarden's own
+        doing: publishing it would record a false ``DRIFTED -> MISSING`` transition
+        (and a ``MISSING_DETECTED`` row) that the post-enforce cycle immediately
+        contradicts. The held entry is restored verbatim, so no transition fires
+        until the action has finished and the next cycle sees its real outcome.
+        """
+        if not self._remediating:
+            return records
+        held = dict(self._remediating)
+        result: list[DriftRecord] = []
+        for record in records:
+            frozen = held.pop(record_key(record), None)
+            result.append(frozen if frozen is not None else record)
+        result.extend(held.values())  # a container mid-removal: still shown until done
+        return result
+
     def _persist_transitions(self, transitions: list[Transition], trigger: str) -> None:
         detection_actions = {
             DriftStatus.ROGUE: AuditAction.ROGUE_DETECTED,
             DriftStatus.DRIFTED: AuditAction.DRIFT_DETECTED,
             DriftStatus.MISSING: AuditAction.MISSING_DETECTED,
         }
+        baseline = self.baseline_info()
         for change in transitions:
             record, previous = change.record, change.previous_status
             correlation_id = self._transition_incident(change)
             details = record.message
             if record.changed_fields:
                 details = f"{record.message} Changed: {', '.join(record.changed_fields)}."
+            cause = transition_trigger(trigger, change)
+            details_json = record_details(record, baseline, cause)
+            if previous is not None:
+                details_json["previous_status"] = previous.value
             self.store.record_drift_event(
                 ref=record.ref,
                 drift_status=record.drift_status,
                 previous_status=previous,
                 service_name=record.service_name,
                 container_name=record.container_name,
-                trigger=transition_trigger(trigger, change),
+                trigger=cause,
                 reason=record.reason or None,
                 correlation_id=correlation_id,
+                details_json=details_json,
             )
             action = detection_actions.get(record.drift_status)
             if action is not None:
-                self.store.record_audit(action, record.ref, details, correlation_id=correlation_id)
+                self.store.record_audit(
+                    action,
+                    record.ref,
+                    details,
+                    correlation_id=correlation_id,
+                    details_json=details_json,
+                )
             elif record.drift_status is DriftStatus.MATCHED and previous is not None:
                 logger.info("{} is back to MATCHED (was {})", record.ref, previous.value)
             if record.drift_status is DriftStatus.MATCHED and correlation_id is not None:
@@ -818,6 +872,8 @@ class Reconciler:
         acted = False
         now = time.monotonic()
         for record in targets:
+            if record_key(record) in self._remediating:
+                continue  # an operator action on it is still in progress
             last = self._enforced_at.get(record.ref)
             if last is not None and now - last < ENFORCEMENT_COOLDOWN_SECONDS:
                 logger.warning(
@@ -827,13 +883,15 @@ class Reconciler:
                     record.drift_status.value,
                 )
                 continue
+            # Stamped before acting: a failed or unverified Enforce is never retried in
+            # this pass, the cooldown decides when a later cycle may try again.
             self._enforced_at[record.ref] = now
+            acted = True  # even when it fails: the post-enforce cycle must show the host
             try:
                 if record.drift_status is DriftStatus.ROGUE:
                     await self._kill_record(record, autonomous=True)
                 else:
                     await self._revert_record(record, autonomous=True)
-                acted = True
             except DriftWardenError as exc:
                 logger.error("Enforcement failed for {}: {}", record.ref, exc)
         return acted
@@ -855,18 +913,58 @@ class Reconciler:
             raise DriftWardenError(f"'{ref}' is buffered for adoption and exempt from enforcement")
         return await self._revert_record(record, autonomous=False)
 
-    async def _revert_record(self, record: DriftRecord, *, autonomous: bool) -> ActionResult:
+    def _begin_remediation(self, record: DriftRecord) -> str:
+        """Hold an entry while Enforce works on it; refuse a second action on it."""
+        key = record_key(record)
+        if key in self._remediating:
+            raise DriftWardenError(f"'{record.ref}' is already being enforced")
+        self._remediating[key] = record
+        return key
+
+    async def _revert_record(
+        self, record: DriftRecord, *, autonomous: bool, source: str | None = None
+    ) -> ActionResult:
+        """Recreate a service from the baseline, then verify the result.
+
+        One ``REVERT_COMPLETED`` row is written per Enforce. It starts ``pending``
+        and resolves to ``success`` once the new container has been inspected and
+        matches the baseline on every compared field, or to ``failed`` with the
+        reason and raises ``ContainerRecreateError`` (the API answers 409, Batch
+        reports the entry as failed); it is never retried here, the cooldown and
+        the next cycle decide. The entry is held in ``_remediating`` throughout so
+        no cycle records the intermediate removal as a false ``MISSING``.
+        """
         if self.baseline is None or record.service_name is None:
             raise DriftWardenError("No baseline available to revert to")
         service = self.baseline.services.get(record.service_name)
         if service is None:
             raise DriftWardenError(f"Service {record.service_name} is no longer in the baseline")
+        source = AUTONOMOUS_SOURCE if autonomous else source or MANUAL_SOURCE
+        key = self._begin_remediation(record)
+        try:
+            return await self._recreate_and_verify(record, service, source=source)
+        finally:
+            self._remediating.pop(key, None)
+            if not autonomous:
+                self.schedule_reconcile("revert")
+
+    async def _recreate_and_verify(
+        self, record: DriftRecord, service: ParsedService, *, source: str
+    ) -> ActionResult:
+        assert self.baseline is not None
+        project = self.baseline.project_name
         action_id = uuid.uuid4().hex[:12]
-        target_name = (
-            service.container_name or f"{self.baseline.project_name}-{service.service_name}-1"
-        )
+        target_name = service.container_name or f"{project}-{service.service_name}-1"
         self._remember_action(record.container_id, record.container_name, target_name, action_id)
         correlation_id = await asyncio.to_thread(self._record_incident, record)
+        details_json = enforce_details(
+            record,
+            self.baseline_info(),
+            source=source,
+            service_name=service.service_name,
+            target_name=target_name,
+            image=service.image,
+        )
         previous = await self._capture_spec(record.container_id)
         try:
             if record.container_id and record.container_name != target_name:
@@ -874,7 +972,7 @@ class Reconciler:
             new_id = await asyncio.to_thread(
                 self.watcher.recreate,
                 service,
-                self.baseline.project_name,
+                project,
                 action_id=action_id,
                 declared_volumes=self.baseline.declared_volumes,
             )
@@ -888,6 +986,7 @@ class Reconciler:
                 record.ref,
                 str(exc),
                 correlation_id=correlation_id,
+                details_json={**details_json, "error": str(exc)},
             )
             raise
         except Exception as exc:  # never let a Docker SDK surprise vanish silently
@@ -900,24 +999,29 @@ class Reconciler:
                 record.ref,
                 repr(exc),
                 correlation_id=correlation_id,
+                details_json={**details_json, "error": repr(exc)},
             )
             raise ContainerRecreateError(
                 f"Enforce failed for {record.ref}: {exc.__class__.__name__}: {exc}"
             ) from exc
         logger.info(
-            "Enforce recreated {} as {} ({}) for {}",
+            "Enforce recreated {} as {} ({}) for {}; verifying",
             service.service_name,
             target_name,
             new_id[:12],
             record.ref,
         )
         self._remember_action(new_id)
-        await asyncio.to_thread(
+        details_json["new_container_id"] = new_id
+        summary = (
+            f"{'autonomous' if source == AUTONOMOUS_SOURCE else 'manual'} recreate of "
+            f"{service.service_name} as {target_name} ({new_id[:12]})"
+        )
+        entry_id = await asyncio.to_thread(
             self.store.record_audit,
             AuditAction.REVERT_COMPLETED,
             record.ref,
-            f"{'autonomous' if autonomous else 'manual'} recreate of {service.service_name} "
-            f"as {target_name} ({new_id[:12]})",
+            f"{summary}; verifying",
             snapshot={
                 "type": "enforce_recreate",
                 "service_name": service.service_name,
@@ -925,15 +1029,54 @@ class Reconciler:
                 "created_name": target_name,
                 "previous": previous,
             },
+            result=EventResult.PENDING,
             correlation_id=correlation_id,
+            details_json=details_json,
         )
-        if not autonomous:
-            self.schedule_reconcile("revert")
+
+        # Verification: the new container, as Docker reports it, against the baseline.
+        try:
+            created = await asyncio.to_thread(self.watcher.inspect, new_id)
+        except DockerConnectionError as exc:
+            created = None
+            logger.warning("Cannot inspect {} for verification: {}", new_id[:12], exc)
+        verification = verify_recreated(
+            created, service, project, expected_name=target_name, expected_id=new_id
+        )
+        if verification.ok:
+            # The tracked container is now the new one: the held entry points at it so
+            # a cycle racing the release still shows the right container.
+            self._remediating[record_key(record)] = record.model_copy(
+                update={
+                    "container_id": new_id,
+                    "container_name": target_name,
+                    "display_name": target_name,
+                }
+            )
+            logger.info("Enforce verified {}: {}", record.ref, verification.reason)
+        else:
+            logger.error("Enforce of {} failed verification: {}", record.ref, verification.reason)
+        await asyncio.to_thread(
+            self.store.set_audit_result,
+            entry_id,
+            EventResult.SUCCESS if verification.ok else EventResult.FAILED,
+            details=f"{summary}; {'verified' if verification.ok else 'verification failed'}: "
+            f"{verification.reason}",
+            details_json=verification_details(verification),
+        )
+        if not verification.ok:
+            raise ContainerRecreateError(
+                f"Recreated {service.service_name} as {target_name}, but verification "
+                f"failed: {verification.reason}"
+            )
         return ActionResult(
             ok=True,
             action="revert",
             target=record.ref,
-            message=f"Recreated {service.service_name} as {target_name} from the Git baseline.",
+            message=(
+                f"Recreated {service.service_name} as {target_name} from the Git baseline "
+                "and verified it matches."
+            ),
         )
 
     async def kill(self, ref: str) -> ActionResult:
@@ -946,14 +1089,38 @@ class Reconciler:
             raise DriftWardenError(f"'{ref}' is not a rogue container")
         return await self._kill_record(record, autonomous=False)
 
-    async def _kill_record(self, record: DriftRecord, *, autonomous: bool) -> ActionResult:
+    async def _kill_record(
+        self, record: DriftRecord, *, autonomous: bool, source: str | None = None
+    ) -> ActionResult:
+        """Stop and remove a container, verify it is gone and close its incident.
+
+        One ``ENFORCE_KILL`` row records the outcome (``success`` once the container
+        is confirmed gone, ``failed`` if it still exists, which also raises
+        ``RogueContainerKillError``) and a ``ROGUE -> REMOVED`` drift transition
+        ends the entry's timeline. The entry is held in ``_remediating`` while the
+        removal runs.
+        """
         if not record.container_id:
             raise DriftWardenError(f"'{record.ref}' has no container to remove")
-        self._remember_action(record.container_id, record.container_name)
-        correlation_id = await asyncio.to_thread(self._record_incident, record)
-        previous = await self._capture_spec(record.container_id)
+        source = AUTONOMOUS_SOURCE if autonomous else source or MANUAL_SOURCE
+        key = self._begin_remediation(record)
         try:
-            await asyncio.to_thread(self.watcher.stop_and_remove, record.container_id)
+            return await self._remove_and_verify(record, key, source=source)
+        finally:
+            self._remediating.pop(key, None)
+            if not autonomous:
+                self.schedule_reconcile("kill")
+
+    async def _remove_and_verify(
+        self, record: DriftRecord, key: str, *, source: str
+    ) -> ActionResult:
+        container_id = record.container_id or ""
+        self._remember_action(container_id, record.container_name)
+        correlation_id = await asyncio.to_thread(self._record_incident, record)
+        details_json = removal_details(record, self.baseline_info(), source=source)
+        previous = await self._capture_spec(container_id)
+        try:
+            await asyncio.to_thread(self.watcher.stop_and_remove, container_id)
         except (RogueContainerKillError, DockerConnectionError) as exc:
             logger.exception("Enforce failed for {} (remove): {}", record.ref, exc)
             await asyncio.to_thread(
@@ -962,6 +1129,7 @@ class Reconciler:
                 record.ref,
                 str(exc),
                 correlation_id=correlation_id,
+                details_json={**details_json, "error": str(exc)},
             )
             raise
         except Exception as exc:  # never let a Docker SDK surprise vanish silently
@@ -972,22 +1140,56 @@ class Reconciler:
                 record.ref,
                 repr(exc),
                 correlation_id=correlation_id,
+                details_json={**details_json, "error": repr(exc)},
             )
             raise RogueContainerKillError(
                 f"Enforce failed for {record.ref}: {exc.__class__.__name__}: {exc}"
             ) from exc
-        logger.info("Enforce removed {} ({})", record.container_name, record.ref)
+        try:
+            remaining = await asyncio.to_thread(self.watcher.inspect, container_id)
+        except DockerConnectionError as exc:
+            remaining = None
+            logger.warning("Cannot inspect {} for verification: {}", container_id[:12], exc)
+        verification = verify_removed(remaining, container_id)
+        summary = (
+            f"{'autonomous' if source == AUTONOMOUS_SOURCE else 'manual'} removal of "
+            f"{record.container_name} ({record.image})"
+        )
+        details_json.update(verification_details(verification))
         await asyncio.to_thread(
             self.store.record_audit,
             AuditAction.ENFORCE_KILL,
             record.ref,
-            f"{'autonomous' if autonomous else 'manual'} removal of {record.container_name} "
-            f"({record.image})",
+            f"{summary}; {'verified' if verification.ok else 'verification failed'}: "
+            f"{verification.reason}",
             snapshot={"type": "enforce_remove", "previous": previous} if previous else None,
+            result=EventResult.SUCCESS if verification.ok else EventResult.FAILED,
             correlation_id=correlation_id,
+            details_json=details_json,
         )
-        if not autonomous:
-            self.schedule_reconcile("kill")
+        if not verification.ok:
+            logger.error("Enforce of {} failed verification: {}", record.ref, verification.reason)
+            raise RogueContainerKillError(
+                f"Removal of {record.container_name} could not be verified: {verification.reason}"
+            )
+        logger.info("Enforce removed {} ({})", record.container_name, record.ref)
+        # The entry's timeline ends here: it has no row on the next snapshot, so the
+        # projector would never record its disappearance.
+        await asyncio.to_thread(
+            self.store.record_drift_event,
+            ref=record.ref,
+            drift_status=DriftStatus.REMOVED,
+            previous_status=record.drift_status,
+            service_name=record.service_name,
+            container_name=record.container_name,
+            trigger=TRIGGER_LABELS["kill"],
+            reason="Stopped and removed by Enforce",
+            result=EventResult.SUCCESS,
+            correlation_id=correlation_id,
+            details_json={**details_json, "previous_status": record.drift_status.value},
+        )
+        await asyncio.to_thread(self.store.close_incident, correlation_id)
+        self._incidents.pop(key, None)
         return ActionResult(
             ok=True,
             action="kill",
@@ -1677,9 +1879,11 @@ class Reconciler:
         for record in targets:
             try:
                 if record.drift_status is DriftStatus.ROGUE:
-                    result = await self._kill_record(record, autonomous=False)
+                    result = await self._kill_record(record, autonomous=False, source=BATCH_SOURCE)
                 else:
-                    result = await self._revert_record(record, autonomous=False)
+                    result = await self._revert_record(
+                        record, autonomous=False, source=BATCH_SOURCE
+                    )
             except DriftWardenError as exc:
                 result = ActionResult(
                     ok=False, action=request.operation, target=record.ref, message=str(exc)

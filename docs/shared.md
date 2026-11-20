@@ -70,6 +70,7 @@ All four enums subclass `str`, so their values serialise to plain strings in JSO
 | `DRIFTED` | `drifted` | Service exists in Git but a compared field differs, or the container is paused / restarting / dead. |
 | `AWAITING_RESTART` | An adopted rogue container whose PR merged: declared in Git, still running without Compose labels; `revert` (Enforce) or `docker compose up` turns it into `MATCHED`. |
 | `PENDING_ADOPTION` | `pending_adoption` | Buffered while an adoption pull request is open; exempt from enforcement. |
+| `REMOVED` | `removed` | Terminal: a rogue container Enforce stopped and removed. Only ever the end of a drift transition (`ROGUE → REMOVED`); never a dashboard row, so `HostSnapshot.counts()` has no counter for it. |
 
 **`AuditAction`** — every row in the `audit_log` table has one of these. The audit log is the
 operator action history: one row per action or detection, never internal plumbing. Grouped by
@@ -92,10 +93,13 @@ colour and filter category: Actions, Detections or Reversals), for example *Enfo
 **`Severity`** (`critical`, `high`, `medium`, `low`, `info`) and **`EventResult`** (`success`,
 `failed`, `pending`) — the severity and RESULT of Events Log rows. The single source is
 `STATUS_SEVERITY` (transitions, by the status moved to: MISSING critical, ROGUE high, DRIFTED
-medium, AWAITING_RESTART low, PENDING_ADOPTION and MATCHED info), `AUDIT_SEVERITY` and
+medium, AWAITING_RESTART low, PENDING_ADOPTION, MATCHED and REMOVED info), `AUDIT_SEVERITY` and
 `AUDIT_RESULT` (the default result of new audit rows: Enforce and merge success, failures
-failed, `adopt_pr_opened` pending; detections none). Rows written before these existed read
-the default severity and no result. `correlation_id_for(n)` formats incident ids (`INC-001`):
+failed, `adopt_pr_opened` pending; detections none). An Enforce recreate overrides it: its row
+starts `pending` and is resolved to `success` or `failed` once the new container has been
+verified against the baseline. Rows written before these existed read the default severity
+and no result. `details_json` on audit rows and transitions is built by
+`warden/engine/event_details.py` and never contains an environment value. `correlation_id_for(n)` formats incident ids (`INC-001`):
 a detection, the Enforce or Adopt taken on it and any reversal share one; legacy rows have none.
 
 **`WhitelistTargetType`** — `CONTAINER` (matched by id or name) or `PROJECT` (matched by the
@@ -282,10 +286,10 @@ is what the engine does.
 
 ## How to extend the contract
 
-* **New drift status**: add it to `DriftStatus`, then to `STATUS_META` and `STATUS_ORDER` in
-  `web/routes/views.py` (label, colour, sort rank) and to the rules in
+* **New drift status**: add it to `DriftStatus` and `STATUS_SEVERITY`, then to `STATUS_META`
+  and `STATUS_ORDER` in `web/routes/views.py` (label, colour, sort rank) and to the rules in
   `warden/engine/diff_engine.py`. The dashboard counters and `HostSnapshot.counts()` pick it up
-  automatically.
+  automatically (unless, like `REMOVED`, it is transition-only and excluded from `counts()`).
 * **New audit action**: add the enum member and call `store.record_audit(...)` where it happens.
   Nothing else needs to change; the Events Log renders any value.
 * **New compared field**: add it to `DIFF_FIELDS`, handle it in `diff_engine.compare`, in

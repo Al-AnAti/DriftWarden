@@ -41,6 +41,7 @@ STATUS_META: dict[str, dict[str, str]] = {
     DriftStatus.ROGUE.value: {"label": "Rogue", "tone": "rose"},
     DriftStatus.PENDING_ADOPTION.value: {"label": "Pending adoption", "tone": "violet"},
     DriftStatus.AWAITING_RESTART.value: {"label": "Awaiting restart", "tone": "orange"},
+    DriftStatus.REMOVED.value: {"label": "Removed", "tone": "slate"},
 }
 """Display label and Tailwind colour family per status."""
 

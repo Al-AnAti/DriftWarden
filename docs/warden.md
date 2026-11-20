@@ -17,6 +17,8 @@ src/warden/
 │   ├── diff_engine.py         pure classification: containers + baseline → DriftRecords
 │   ├── state_projector.py     holds the latest HostSnapshot, fans it out over SSE
 │   ├── store.py               StateStore Protocol (implemented by web.db.repository.Store)
+│   ├── verification.py        pure post-Enforce checks: is the new container right, is the old one gone
+│   ├── event_details.py       secret-free details_json builders for audit rows and transitions
 │   └── reconciler.py          the orchestrator: loops, cycles, enforcement, operator actions
 └── automation/
     ├── github_client.py       PyGithub: baseline fetch with ETag, PR open/close/state
@@ -273,6 +275,34 @@ synchronous and the reconciler calls them through `asyncio.to_thread`.
 
 ---
 
+## `engine/verification.py`
+
+Pure functions the reconciler runs after every Enforce step, on freshly inspected state:
+
+* `verify_recreated(container, service, project, expected_name=, expected_id=)` — the new
+  container must exist, carry the id and name `recreate` produced, and differ from its
+  baseline service on no compared field (`diff_engine.compare`, so "verified" means exactly
+  what MATCHED means; a container that is not running fails on the `state` row).
+* `verify_removed(container, container_id)` — the removed container must be gone.
+
+Both return a `Verification(ok, reason, container, diffs)`; `changed_fields` lists what still
+differs.
+
+## `engine/event_details.py`
+
+Builds the `details_json` mapping stored with audit rows and drift transitions, so the Events
+Log can show structured metadata without any environment value ever reaching SQLite.
+`mask_pairs` turns `KEY=value` entries of a diff string into `KEY=***` (every value for the
+`environment` field, secret-looking keys such as `*_TOKEN` for labels), keeping `${KEY}`
+placeholders and `<unset>` markers readable. Builders: `record_details` (detections and
+transitions: identity, image and tag, baseline source / Git repo / branch / path / SHA,
+status, trigger, reason, changed fields), `enforce_details` and `removal_details` (Enforce
+rows: `trigger_source`, `previous_container_id`, target name, image, previous image and
+status, diff), `verification_details` (`verified`, the reason, the container state and the
+remaining diff when verification failed).
+
+---
+
 ## `engine/reconciler.py`
 
 The orchestrator. One `Reconciler` is created in the FastAPI lifespan with the settings, the
@@ -345,11 +375,19 @@ Under `_cycle_lock` (cycles never overlap):
    red "DOCKER UNAVAILABLE" banner shows.
 3. `evaluate(containers, self._context())` in a thread (it may touch Docker for image lookups,
    which are cached per image id).
-4. Build the `HostSnapshot`, compute `transitions`, `projector.publish`.
-5. `_persist_transitions` — one `drift_events` row per transition (from, to, the trigger
-   label and the record's concise `reason`, never the prose message), plus an audit row
-   (`ROGUE_DETECTED` / `DRIFT_DETECTED` / `MISSING_DETECTED`) when an entry becomes a problem.
-   A return to `MATCHED` is a transition only (and an application log line).
+4. `_hold_remediations`: an entry Enforce is working on right now (`_remediating`, by record
+   key) is put back exactly as it was when the action started. Between the removal of the old
+   container and the start of the new one the host really is missing the service, but that
+   is DriftWarden's own doing: without the hold, a sweep or an unrelated Docker event landing
+   in that window recorded a false `DRIFTED → MISSING` (plus a `MISSING_DETECTED` row) that
+   the post-enforce cycle contradicted a second later. Other entries in the same cycle are
+   evaluated normally, so a genuine change elsewhere on the host is still recorded.
+5. Build the `HostSnapshot`, compute `transitions`, `projector.publish`.
+6. `_persist_transitions` — one `drift_events` row per transition (from, to, the trigger
+   label and the record's concise `reason`, never the prose message, plus a `details_json`
+   from `event_details.record_details`), plus an audit row (`ROGUE_DETECTED` /
+   `DRIFT_DETECTED` / `MISSING_DETECTED`) when an entry becomes a problem. A return to
+   `MATCHED` is a transition only (and an application log line).
 
 Then, outside the lock: if `enforcement_active` and the trigger is neither `startup` nor
 `post-enforce`, run `_enforce(snapshot)`; if it acted, schedule `reconcile("post-enforce")` so
@@ -369,8 +407,39 @@ or since the mode was switched to enforce.
 * skips any entry it acted on less than `ENFORCEMENT_COOLDOWN_SECONDS` (60 s) ago and is
   still broken, logging a warning: this is the loop guard for a service that cannot be fixed
   (for example an image that will not pull);
+* skips an entry an operator action is still working on (`_remediating`);
 * kills rogue containers and recreates drifted / missing services, auditing each outcome.
-  Failures are logged and the pass continues with the next entry.
+  Failures are logged and the pass continues with the next entry. The cooldown stamp is
+  written *before* acting, so an Enforce whose verification fails is never retried in the
+  same pass: the next sweep or event cycle may try again once the cooldown has passed.
+
+### What one Enforce writes
+
+One audit row per Enforce, never sub-rows for the stop, remove, create or verify steps:
+
+* **Recreate** (`_revert_record`): hold the entry; remember the action; capture the old
+  container's spec for reversal; remove the old container if its name differs from the
+  target; `watcher.recreate`. On a Docker error: `REVERT_FAILED` (result `failed`, the error
+  in `details_json`) and the exception propagates. Otherwise a `REVERT_COMPLETED` row is
+  written with result **`pending`** and `details_json` from `enforce_details` plus
+  `new_container_id`; the new container is then inspected and checked with
+  `verification.verify_recreated`. `store.set_audit_result` resolves the row once: `success`
+  (details end with `verified: ...`) or `failed` (`verification failed: <reason>`, the
+  remaining diff under `verification_diff`). A failed verification raises
+  `ContainerRecreateError` after the row is resolved (HTTP 409 for the API, a failed result
+  for that entry in Batch, a log line for autonomous enforcement); the entry stays DRIFTED /
+  MISSING on the next cycle and the incident stays open.
+* **Remove** (`_kill_record`): hold the entry; `stop_and_remove`; inspect again. The
+  `ENFORCE_KILL` row carries `success` when the container is gone or `failed` when it still
+  exists (which then raises `RogueContainerKillError`), with `removal_details`. On success a
+  `ROGUE → REMOVED` drift transition (trigger
+  `Enforce Remove`, result `success`, same incident) ends the entry's timeline, since a
+  container that no longer exists never shows up in a later snapshot, and the incident is
+  closed there and then. Docker errors still write `ENFORCE_KILL_FAILED` and raise.
+
+The hold is released in a `finally`, after which the post-enforce (or `revert` / `kill`)
+cycle records the real outcome: `DRIFTED → MATCHED` with trigger `Enforce Recreate`, or
+nothing at all for a removed container.
 
 ### Operator actions
 
@@ -379,8 +448,8 @@ All of these take a `ref` and resolve it with `HostSnapshot.find`. They raise
 
 | Method | Applies to | What happens |
 | --- | --- | --- |
-| `revert(ref)` | DRIFTED or MISSING managed service (not PENDING_ADOPTION) | Remember the action; if the live container has a different name than the target, remove it; `watcher.recreate` from the baseline service; audit `REVERT_COMPLETED` or `REVERT_FAILED`; schedule `reconcile("revert")`. |
-| `kill(ref)` | ROGUE (or a MISSING entry that still has a stopped container) | Remember; `stop_and_remove`; audit `ENFORCE_KILL` / `ENFORCE_KILL_FAILED`; reconcile. |
+| `revert(ref)` | DRIFTED or MISSING managed service (not PENDING_ADOPTION) | Hold the entry; remember the action; if the live container has a different name than the target, remove it; `watcher.recreate` from the baseline service; audit one `REVERT_COMPLETED` (pending → verified `success` / `failed`) or `REVERT_FAILED`; schedule `reconcile("revert")`. Refused with `DriftWardenError` while another action holds the entry. |
+| `kill(ref)` | ROGUE (or a MISSING entry that still has a stopped container) | Hold; remember; `stop_and_remove`; verify it is gone; audit `ENFORCE_KILL` (`success` / `failed`) or `ENFORCE_KILL_FAILED`; record `ROGUE → REMOVED`; reconcile. |
 | `adopt(ref, note)` | ROGUE or DRIFTED | See below. |
 | `adopt_deletion(ref, note)` | MISSING | Opens a PR that deletes the service block; buffers under `service:<name>` with `kind="remove"`. |
 | `batch(request)` | a scope | Audit `BATCH_REQUESTED`; `enforce` runs kill/revert per target, collecting a result per entry; `adopt` delegates to `adopt_all`. |

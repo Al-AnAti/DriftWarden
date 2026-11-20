@@ -305,10 +305,14 @@ class HostSnapshot(BaseModel):
     exempt: list[str] = Field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
-        """Number of records per drift status, keyed by enum value."""
-        totals = {status.value: 0 for status in DriftStatus}
+        """Number of records per drift status, keyed by enum value.
+
+        ``REMOVED`` is the terminal end of a transition, never a dashboard row, so
+        it has no counter.
+        """
+        totals = {s.value: 0 for s in DriftStatus if s is not DriftStatus.REMOVED}
         for record in self.records:
-            totals[record.drift_status.value] += 1
+            totals[record.drift_status.value] = totals.get(record.drift_status.value, 0) + 1
         return totals
 
     @property

@@ -67,6 +67,11 @@ class DriftStatus(str, Enum):
     Compose labels Git would give it; it becomes MATCHED once Compose (or Enforce)
     recreates it."""
 
+    REMOVED = "removed"
+    """Terminal state of a rogue container Enforce stopped and removed. It only ever
+    appears as the end of a drift transition (``ROGUE -> REMOVED``); a removed
+    container has no dashboard row."""
+
 
 class AuditAction(str, Enum):
     """Identifies an auditable action performed by the control plane or engine."""
@@ -202,6 +207,7 @@ STATUS_SEVERITY: dict[DriftStatus, Severity] = {
     DriftStatus.AWAITING_RESTART: Severity.LOW,
     DriftStatus.PENDING_ADOPTION: Severity.INFO,
     DriftStatus.MATCHED: Severity.INFO,
+    DriftStatus.REMOVED: Severity.INFO,
 }
 """Severity of a drift transition, by the status it moved to."""
 

@@ -42,6 +42,10 @@ class FakeWatcher:
         removed: Container ids passed to ``stop_and_remove``.
         recreated: ``(service_name, project, action_id)`` tuples from ``recreate``.
         fail_listing: Raise ``DockerConnectionError`` from ``list_containers``.
+        on_recreate: Builds the container ``recreate`` adds to the host; defaults to
+            :func:`container_from_service` (a container that matches the service, as
+            Docker would produce). Replace it to simulate a recreate that comes out
+            wrong, or set it to ``None`` to simulate a container that never appears.
     """
 
     def __init__(self, settings: WardenSettings | None = None) -> None:
@@ -53,7 +57,9 @@ class FakeWatcher:
         self.self_container_id: str | None = None
         self.connected = True
         self.last_error: str | None = None
-        self.on_recreate: Callable[[ParsedService, str], LiveContainer] | None = None
+        self.on_recreate: Callable[[ParsedService, str], LiveContainer] | None = (
+            container_from_service
+        )
         self.missing_images: set[str] = set()
         self.restored: list[tuple[str, str]] = []
 

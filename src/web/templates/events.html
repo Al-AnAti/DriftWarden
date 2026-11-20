@@ -2,27 +2,86 @@
 
 {% block title %}Events Log &middot; DriftWarden{% endblock %}
 
+{% macro severity_badge(value) -%}
+{%- set meta = severity_meta.get(value) -%}
+{%- if meta %}<span class="badge badge-sm tone-{{ meta.tone }}">{{ meta.label }}</span>{% else %}<span class="text-slate-600">—</span>{% endif -%}
+{%- endmacro %}
+
+{% macro result_badge(value) -%}
+{%- set meta = result_meta.get(value) if value else none -%}
+{%- if meta %}<span class="badge badge-sm tone-{{ meta.tone }}">{{ meta.label }}</span>{% else %}<span class="text-slate-600">—</span>{% endif -%}
+{%- endmacro %}
+
+{% macro incident_badge(value) -%}
+{%- if value -%}
+<a class="badge badge-sm tone-indigo incident-link" href="/events?q={{ value | urlencode }}" title="Show every event of {{ value }}, oldest first">{{ value }}</a>
+{%- else -%}<span class="text-slate-600" title="Recorded before incident ids existed">—</span>{%- endif -%}
+{%- endmacro %}
+
 {% block content %}
-<div class="space-y-8">
+<div class="space-y-6">
     <div class="flex justify-between items-center">
         <h1 class="text-2xl font-bold tracking-tight">Events Log</h1>
         <button onclick="wardenRefreshPage()" class="btn-lg btn-ghost text-sm">🔄 Refresh</button>
     </div>
 
+    <form method="get" action="/events" class="filter-bar" role="search" aria-label="Filter events">
+        {% if filter.category != 'all' %}<input type="hidden" name="category" value="{{ filter.category }}">{% endif %}
+        <label class="filter-field grow min-w-[14rem]">
+            <span>Search</span>
+            <input type="search" name="q" value="{{ filter.query }}" placeholder="Container, service, INC-001 or #id" autocomplete="off">
+        </label>
+        <label class="filter-field">
+            <span>Severity</span>
+            <select name="severity">
+                <option value="">Any</option>
+                {% for key, meta in severity_meta.items() %}
+                <option value="{{ key }}" {% if filter.severity == key %}selected{% endif %}>{{ meta.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="filter-field">
+            <span>From (UTC)</span>
+            <input type="date" name="since" value="{{ filter.raw_since }}">
+        </label>
+        <label class="filter-field">
+            <span>To (UTC)</span>
+            <input type="date" name="until" value="{{ filter.raw_until }}">
+        </label>
+        <div class="flex items-end gap-2">
+            <button type="submit" class="btn btn-violet">Apply</button>
+            {% if filter.active or filter.category != 'all' %}<a class="btn btn-ghost" href="/events">Clear</a>{% endif %}
+        </div>
+    </form>
+
+    {% if filter.correlation %}
+    <div class="banner border-indigo-500/50 bg-indigo-950/40 text-indigo-100 flex flex-wrap justify-between gap-2" id="incident-banner">
+        <span>Incident <strong class="font-mono">{{ filter.correlation }}</strong>: {{ events_total }} transition{{ '' if events_total == 1 else 's' }} and {{ audit_total }} audit row{{ '' if audit_total == 1 else 's' }}, oldest first.</span>
+        <a class="text-indigo-300 hover:underline" href="/events">Show every event</a>
+    </div>
+    {% endif %}
+
     <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-        <header class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-            <h2 class="font-semibold">Drift transitions</h2>
-            <span class="text-xs text-slate-500">{{ events | length }} shown</span>
+        <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap gap-3 justify-between items-center">
+            <div class="flex items-baseline gap-3">
+                <h2 class="font-semibold">Drift transitions</h2>
+                <span class="text-xs text-slate-500">{{ events | length }}{% if events_total > events | length %} of {{ events_total }}{% endif %} shown</span>
+            </div>
+            <div class="flex gap-2">
+                <a class="btn btn-ghost" href="/api/export/transitions{{ filter.query_string(format='csv') }}" download>Export CSV</a>
+                <a class="btn btn-ghost" href="/api/export/transitions{{ filter.query_string(format='json') }}" download>Export JSON</a>
+            </div>
         </header>
         <div class="overflow-x-auto">
-        <table class="min-w-full text-sm">
+        <table class="min-w-full text-sm" id="events-table">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-4 py-2">When (UTC)</th><th class="text-left px-4 py-2">Entry</th><th class="text-left px-4 py-2">From &rarr; To</th><th class="text-left px-4 py-2">Trigger</th><th class="text-left px-4 py-2">Reason</th></tr>
+                <tr><th class="text-left px-4 py-2">When (UTC)</th><th class="text-left px-4 py-2">Severity</th><th class="text-left px-4 py-2">Entry</th><th class="text-left px-4 py-2">From &rarr; To</th><th class="text-left px-4 py-2">Trigger</th><th class="text-left px-4 py-2">Reason</th><th class="text-left px-4 py-2">Incident</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
                 {% for e in events %}
-                <tr>
-                    <td class="px-4 py-2 font-mono text-xs text-slate-400 whitespace-nowrap align-top">{{ e.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <tr class="event-row{% if filter.correlation and e.correlation_id == filter.correlation %} row-highlight{% endif %}" data-expand="event-{{ e.id }}-details" tabindex="0" aria-expanded="false" aria-controls="event-{{ e.id }}-details" title="Show details">
+                    <td class="px-4 py-2 font-mono text-xs text-slate-400 whitespace-nowrap align-top"><span class="chevron" aria-hidden="true">&#9656;</span> {{ e.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-4 py-2 align-top whitespace-nowrap">{{ severity_badge(e.severity) }}</td>
                     <td class="px-4 py-2 font-mono text-xs align-top wrap-anywhere min-w-[10rem]"><a class="text-indigo-300 hover:underline" href="/diff/{{ e.ref }}">{{ e.ref }}</a></td>
                     <td class="px-4 py-2 whitespace-nowrap align-top">
                         {% if e.previous_status %}<span class="badge tone-{{ status_meta[e.previous_status].tone }}">{{ status_meta[e.previous_status].label }}</span>{% else %}<span class="badge tone-slate opacity-60" title="First seen">New</span>{% endif %}
@@ -31,9 +90,34 @@
                     </td>
                     <td class="px-4 py-2 text-xs text-slate-200 align-top min-w-[9rem]">{{ e.trigger or '—' }}</td>
                     <td class="px-4 py-2 text-xs text-slate-400 align-top wrap-anywhere min-w-[14rem]">{{ e.reason or '' }}</td>
+                    <td class="px-4 py-2 align-top whitespace-nowrap">{{ incident_badge(e.correlation_id) }}</td>
+                </tr>
+                <tr id="event-{{ e.id }}-details" class="detail-row" hidden>
+                    <td colspan="7" class="px-6 py-4">
+                        <div class="detail-drawer">
+                            <dl class="kv-grid">
+                                <dt>Event</dt><dd class="font-mono">#{{ e.id }} &middot; {{ e.detected_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}</dd>
+                                <dt>Incident</dt><dd>{{ incident_badge(e.correlation_id) }}</dd>
+                                <dt>Severity</dt><dd>{{ severity_badge(e.severity) }}</dd>
+                                <dt>Compose service</dt><dd class="font-mono">{{ e.service_name or '—' }}</dd>
+                                <dt>Container</dt><dd class="font-mono break-anywhere">{{ e.container_name or '—' }}</dd>
+                                <dt>Trigger</dt><dd>{{ e.trigger or '—' }}</dd>
+                                <dt>Reason</dt><dd>{{ e.reason or '—' }}</dd>
+                                <dt>Host</dt><dd class="font-mono">{{ e.hostname or '—' }}</dd>
+                            </dl>
+                            <div class="mt-4">
+                                <h3 class="detail-heading">Recorded details</h3>
+                                {% if e.details_json %}{{ e.details_json | details }}{% else %}<p class="text-xs text-slate-500">No structured details were recorded for this event.</p>{% endif %}
+                            </div>
+                            <div class="mt-3 flex flex-wrap gap-4 text-xs">
+                                <a class="text-indigo-300 hover:underline" href="/diff/{{ e.ref }}">Open the current diff</a>
+                                {% if e.correlation_id %}<a class="text-indigo-300 hover:underline" href="/events?q={{ e.correlation_id | urlencode }}">All events of {{ e.correlation_id }}</a>{% endif %}
+                            </div>
+                        </div>
+                    </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No transitions recorded yet.</td></tr>
+                <tr><td colspan="7" class="px-6 py-8 text-center text-slate-500">{% if filter.active %}No transitions match these filters.{% else %}No transitions recorded yet.{% endif %}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -42,28 +126,38 @@
 
     <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap gap-3 justify-between items-center">
-            <h2 class="font-semibold">Audit log</h2>
-            <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter the audit log">
-                {% for key, label in audit_categories %}
-                <button type="button" class="filter-pill" data-audit-filter="{{ key }}" aria-pressed="{{ 'true' if key == 'all' else 'false' }}" onclick="wardenFilterAudit('{{ key }}')">{{ label }} <span class="count">{{ audit_counts[key] }}</span></button>
-                {% endfor %}
+            <div class="flex items-baseline gap-3">
+                <h2 class="font-semibold">Audit log</h2>
+                <span class="text-xs text-slate-500">{{ audit | length }}{% if audit_total > audit | length %} of {{ audit_total }}{% endif %} shown</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <nav class="flex flex-wrap items-center gap-2" aria-label="Audit log category">
+                    {% for key, label in audit_categories %}
+                    <a class="filter-pill" data-audit-filter="{{ key }}" aria-pressed="{{ 'true' if filter.category == key else 'false' }}" {% if filter.category == key %}aria-current="page"{% endif %} href="/events{{ filter.query_string(category=key) }}">{{ label }} <span class="count">{{ audit_counts[key] }}</span></a>
+                    {% endfor %}
+                </nav>
+                <a class="btn btn-ghost" href="/api/export/audit{{ filter.query_string(format='csv') }}" download>Export CSV</a>
+                <a class="btn btn-ghost" href="/api/export/audit{{ filter.query_string(format='json') }}" download>Export JSON</a>
             </div>
         </header>
         <div class="overflow-x-auto">
         <table class="min-w-full text-sm" id="audit-table">
             <thead class="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                <tr><th class="text-left px-4 py-2">#</th><th class="text-left px-4 py-2">When (UTC)</th><th class="text-left px-4 py-2">Action</th><th class="text-left px-4 py-2">Target</th><th class="text-left px-4 py-2">Host</th><th class="text-left px-4 py-2">Details</th><th class="text-right px-4 py-2"></th></tr>
+                <tr><th class="text-left px-4 py-2">#</th><th class="text-left px-4 py-2">When (UTC)</th><th class="text-left px-4 py-2">Severity</th><th class="text-left px-4 py-2">Action</th><th class="text-left px-4 py-2">Result</th><th class="text-left px-4 py-2">Target</th><th class="text-left px-4 py-2">Host</th><th class="text-left px-4 py-2">Details</th><th class="text-left px-4 py-2">Incident</th><th class="text-right px-4 py-2"></th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
                 {% for a in audit %}
-                {% set meta = audit_meta[a.action.value] %}
-                <tr id="audit-{{ a.id }}" data-category="{{ meta.category }}">
-                    <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top">{{ a.id }}</td>
+                {% set meta = audit_meta(a.action.value) %}
+                <tr id="audit-{{ a.id }}" class="event-row{% if filter.correlation and a.correlation_id == filter.correlation %} row-highlight{% endif %}" data-category="{{ meta.category }}" data-expand="audit-{{ a.id }}-details" tabindex="0" aria-expanded="false" aria-controls="audit-{{ a.id }}-details" title="Show details">
+                    <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top whitespace-nowrap"><span class="chevron" aria-hidden="true">&#9656;</span> {{ a.id }}</td>
                     <td class="px-4 py-2 font-mono text-xs text-slate-400 whitespace-nowrap align-top">{{ a.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-4 py-2 align-top whitespace-nowrap">{{ severity_badge(a.severity.value) }}</td>
                     <td class="px-4 py-2 align-top whitespace-nowrap"><span class="badge tone-{{ meta.tone }}" title="{{ a.action.value }}">{{ meta.label }}</span>{% if a.reverses_id %} <a class="text-xs text-indigo-300 hover:underline" href="#audit-{{ a.reverses_id }}">of #{{ a.reverses_id }}</a>{% endif %}</td>
+                    <td class="px-4 py-2 align-top whitespace-nowrap">{{ result_badge(a.result.value if a.result else none) }}</td>
                     <td class="px-4 py-2 font-mono text-xs align-top wrap-anywhere min-w-[10rem]">{{ a.target }}</td>
                     <td class="px-4 py-2 font-mono text-xs text-slate-500 align-top whitespace-nowrap">{{ a.hostname or '' }}</td>
                     <td class="px-4 py-2 text-xs text-slate-300 align-top wrap-anywhere min-w-[16rem]">{{ a.details | pr_links(pr_base_url) }}</td>
+                    <td class="px-4 py-2 align-top whitespace-nowrap">{{ incident_badge(a.correlation_id) }}</td>
                     <td class="px-4 py-2 text-right whitespace-nowrap align-top">
                         {% if a.action.value in reversible_actions %}
                         <button type="button" class="btn btn-ghost disabled:opacity-40 disabled:cursor-not-allowed"
@@ -72,10 +166,34 @@
                         {% endif %}
                     </td>
                 </tr>
+                <tr id="audit-{{ a.id }}-details" class="detail-row" hidden>
+                    <td colspan="10" class="px-6 py-4">
+                        <div class="detail-drawer">
+                            <dl class="kv-grid">
+                                <dt>Entry</dt><dd class="font-mono">#{{ a.id }} &middot; {{ a.timestamp.strftime('%Y-%m-%dT%H:%M:%SZ') }}</dd>
+                                <dt>Incident</dt><dd>{{ incident_badge(a.correlation_id) }}</dd>
+                                <dt>Action</dt><dd>{{ meta.label }} <span class="font-mono text-slate-500">({{ a.action.value }})</span></dd>
+                                <dt>Severity</dt><dd>{{ severity_badge(a.severity.value) }}</dd>
+                                <dt>Result</dt><dd>{{ result_badge(a.result.value if a.result else none) }}</dd>
+                                <dt>Target</dt><dd class="font-mono break-anywhere">{{ a.target }}</dd>
+                                <dt>Host</dt><dd class="font-mono">{{ a.hostname or '—' }}</dd>
+                                {% if a.reverses_id %}<dt>Reverses</dt><dd><a class="text-indigo-300 hover:underline" href="#audit-{{ a.reverses_id }}">#{{ a.reverses_id }}</a></dd>{% endif %}
+                                {% if a.reversed_by_id %}<dt>Reversed by</dt><dd><a class="text-indigo-300 hover:underline" href="#audit-{{ a.reversed_by_id }}">#{{ a.reversed_by_id }}</a></dd>{% endif %}
+                                <dt>Details</dt><dd class="break-anywhere">{{ a.details | pr_links(pr_base_url) if a.details else '—' }}</dd>
+                            </dl>
+                            <div class="mt-4">
+                                <h3 class="detail-heading">Recorded details</h3>
+                                {% if a.details_json %}{{ a.details_json | details }}{% else %}<p class="text-xs text-slate-500">No structured details were recorded for this entry.</p>{% endif %}
+                            </div>
+                            {% if a.correlation_id %}
+                            <div class="mt-3 text-xs"><a class="text-indigo-300 hover:underline" href="/events?q={{ a.correlation_id | urlencode }}">All events of {{ a.correlation_id }}</a></div>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
                 {% else %}
-                <tr><td colspan="7" class="px-6 py-8 text-center text-slate-500">No audit rows yet.</td></tr>
+                <tr><td colspan="10" class="px-6 py-8 text-center text-slate-500">{% if filter.active or filter.category != 'all' %}No audit rows match these filters.{% else %}No audit rows yet.{% endif %}</td></tr>
                 {% endfor %}
-                <tr id="audit-filter-empty" hidden><td colspan="7" class="px-6 py-8 text-center text-slate-500">No rows in this category.</td></tr>
             </tbody>
         </table>
         </div>

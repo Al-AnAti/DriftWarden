@@ -3,10 +3,11 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 
 from shared.models import (
@@ -22,6 +23,17 @@ from shared.models import (
     WhitelistRequest,
 )
 from warden.engine.state_projector import snapshot_payload
+from web.event_log import (
+    AUDIT_COLUMNS,
+    EVENT_COLUMNS,
+    EXPORT_LIMIT,
+    EventFilter,
+    audit_export_rows,
+    event_export_rows,
+    to_csv,
+    to_json,
+)
+from web.routes.views import filtered_events
 from web.runtime import get_runtime
 
 router = APIRouter(prefix="/api", tags=["Control Plane API"])
@@ -222,6 +234,38 @@ def audit(request: Request, limit: int = 200) -> list[AuditLogEntry]:
 def drift_events(request: Request, limit: int = 200) -> list[dict[str, object]]:
     """Most recent status transitions."""
     return get_runtime(request).store.list_drift_events(limit=min(max(limit, 1), 1000))
+
+
+@router.get("/export/{table}")
+def export_events(request: Request, table: str, format: str = "csv") -> Response:
+    """Download the audit log or the drift transitions as CSV or JSON.
+
+    Takes the Events page's filter parameters (``category`` for the audit log,
+    ``severity``, ``since``, ``until``, ``q``), so the file holds exactly the rows
+    the operator filtered to, without the page's display limit. Timestamps are
+    UTC ISO 8601; structured metadata is kept (secrets masked).
+    """
+    if table not in ("audit", "transitions"):
+        raise HTTPException(status_code=404, detail="Export 'audit' or 'transitions'")
+    if format not in ("csv", "json"):
+        raise HTTPException(status_code=400, detail="Format must be 'csv' or 'json'")
+    event_filter = EventFilter.from_params(request.query_params)
+    audit, events = filtered_events(get_runtime(request), event_filter, EXPORT_LIMIT)
+    if table == "audit":
+        rows, columns = audit_export_rows(audit), AUDIT_COLUMNS
+    else:
+        rows, columns = event_export_rows(events), EVENT_COLUMNS
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    name = f"driftwarden-{'audit-log' if table == 'audit' else 'drift-transitions'}-{stamp}"
+    if format == "csv":
+        body, media = to_csv(rows, columns), "text/csv; charset=utf-8"
+    else:
+        body, media = to_json(rows, table, event_filter), "application/json"
+    return Response(
+        content=body,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}.{format}"'},
+    )
 
 
 @router.get("/buffer", response_model=list[PendingAdoption])

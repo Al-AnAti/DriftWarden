@@ -11,10 +11,23 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
-from shared.constants import REVERSIBLE_ACTIONS, AuditAction, DriftStatus
-from shared.models import DriftRecord
+from shared.constants import REVERSIBLE_ACTIONS, DriftStatus
+from shared.models import AuditLogEntry, DriftRecord
 from warden.engine.state_projector import snapshot_payload
+from web.event_log import (
+    AUDIT_CATEGORIES,
+    AUDIT_META,
+    PAGE_LIMIT,
+    RESULT_META,
+    SCAN_LIMIT,
+    SEVERITY_META,
+    EventFilter,
+    audit_meta,
+    render_details,
+)
 from web.runtime import WardenRuntime, get_runtime
+
+__all__ = ["AUDIT_CATEGORIES", "AUDIT_META", "pr_links", "pull_base_url", "router"]
 
 router = APIRouter(tags=["Web UI Views"])
 
@@ -41,114 +54,6 @@ OVERALL_META: dict[str, dict[str, str]] = {
 }
 """Headline pill text and colour per overall status."""
 
-AUDIT_CATEGORIES: tuple[tuple[str, str], ...] = (
-    ("all", "All"),
-    ("actions", "Actions"),
-    ("detections", "Detections"),
-    ("reversals", "Reversals"),
-)
-"""Filter pills above the audit log: key and label."""
-
-_A = AuditAction
-AUDIT_META: dict[str, dict[str, str]] = {
-    _A.ROGUE_DETECTED.value: {"label": "Rogue Detected", "tone": "rose", "category": "detections"},
-    _A.DRIFT_DETECTED.value: {"label": "Drift Detected", "tone": "amber", "category": "detections"},
-    _A.MISSING_DETECTED.value: {
-        "label": "Missing Detected",
-        "tone": "sky",
-        "category": "detections",
-    },
-    _A.STATE_RESTORED.value: {
-        "label": "State Restored",
-        "tone": "emerald",
-        "category": "detections",
-    },
-    _A.REVERT_COMPLETED.value: {
-        "label": "Enforced (Recreated)",
-        "tone": "emerald",
-        "category": "actions",
-    },
-    _A.ENFORCE_KILL.value: {
-        "label": "Enforced (Removed)",
-        "tone": "emerald",
-        "category": "actions",
-    },
-    _A.REVERT_FAILED.value: {
-        "label": "Enforce Failed (Recreate)",
-        "tone": "rose",
-        "category": "actions",
-    },
-    _A.ENFORCE_KILL_FAILED.value: {
-        "label": "Enforce Failed (Remove)",
-        "tone": "rose",
-        "category": "actions",
-    },
-    _A.REVERT_REQUESTED.value: {
-        "label": "Enforce Requested",
-        "tone": "slate",
-        "category": "actions",
-    },
-    _A.ADOPT_REQUESTED.value: {"label": "Adopt Requested", "tone": "slate", "category": "actions"},
-    _A.ADOPT_PR_OPENED.value: {"label": "PR Opened", "tone": "violet", "category": "actions"},
-    _A.ADOPT_FAILED.value: {"label": "Adopt Failed", "tone": "rose", "category": "actions"},
-    _A.ADOPTION_MERGED.value: {
-        "label": "Adoption Merged",
-        "tone": "emerald",
-        "category": "actions",
-    },
-    _A.ADOPTION_CLEARED.value: {
-        "label": "Adoption Cleared",
-        "tone": "emerald",
-        "category": "actions",
-    },
-    _A.ADOPTION_CLOSED.value: {"label": "PR Closed", "tone": "slate", "category": "actions"},
-    _A.ADOPTION_EXPIRED.value: {
-        "label": "Adoption Expired",
-        "tone": "orange",
-        "category": "actions",
-    },
-    _A.ADOPTION_INVALIDATED.value: {
-        "label": "Adoption Invalidated",
-        "tone": "orange",
-        "category": "actions",
-    },
-    _A.ADOPTION_REVOKED.value: {
-        "label": "Adoption Revoked",
-        "tone": "slate",
-        "category": "actions",
-    },
-    _A.REVERSAL_COMPLETED.value: {"label": "Reversed", "tone": "indigo", "category": "reversals"},
-    _A.REVERSAL_FAILED.value: {"label": "Reversal Failed", "tone": "rose", "category": "reversals"},
-    _A.REVERSAL_REFUSED.value: {
-        "label": "Reversal Refused",
-        "tone": "orange",
-        "category": "reversals",
-    },
-    _A.WHITELIST_ADDED.value: {"label": "Whitelisted", "tone": "slate", "category": "actions"},
-    _A.WHITELIST_REMOVED.value: {
-        "label": "Whitelist Removed",
-        "tone": "slate",
-        "category": "actions",
-    },
-    _A.SETTINGS_CHANGED.value: {
-        "label": "Settings Changed",
-        "tone": "slate",
-        "category": "actions",
-    },
-    _A.BATCH_REQUESTED.value: {"label": "Batch Requested", "tone": "slate", "category": "actions"},
-    _A.ENGINE_STARTED.value: {"label": "Engine Started", "tone": "slate", "category": "actions"},
-    _A.BASELINE_FETCHED.value: {
-        "label": "Baseline Fetched",
-        "tone": "slate",
-        "category": "actions",
-    },
-    _A.BASELINE_FETCH_FAILED.value: {
-        "label": "Baseline Fetch Failed",
-        "tone": "rose",
-        "category": "actions",
-    },
-}
-"""Badge label, colour family and filter category per audit action."""
 
 _PR_REFERENCE = re.compile(r"PR #(\d+)(?: https://github\.com/[^\s]+/pull/\d+)?")
 
@@ -186,6 +91,7 @@ def pr_links(text: str | None, base_url: str | None) -> Markup:
 
 
 templates.env.filters["pr_links"] = pr_links
+templates.env.filters["details"] = render_details
 
 
 def pull_base_url(target_repo: str | None, mock: bool) -> str | None:
@@ -303,20 +209,62 @@ def events_page(request: Request) -> HTMLResponse:
     """Audit log and drift transitions."""
     runtime = get_runtime(request)
     context = base_context(request, runtime, "events")
-    audit = runtime.store.list_audit(limit=200)
-    context["audit"] = audit
-    context["audit_meta"] = AUDIT_META
+    event_filter = EventFilter.from_params(request.query_params)
+    audit, events = filtered_events(runtime, event_filter, SCAN_LIMIT)
+    every_category = [
+        a
+        for a in runtime.store.list_audit(
+            SCAN_LIMIT, since=event_filter.since, until=event_filter.until
+        )
+        if event_filter.without_category().match_audit(a)
+    ]
+    context["filter"] = event_filter
+    context["audit"] = audit[:PAGE_LIMIT]
+    context["audit_total"] = len(audit)
+    context["events"] = events[:PAGE_LIMIT]
+    context["events_total"] = len(events)
+    context["audit_meta"] = audit_meta
     context["audit_categories"] = AUDIT_CATEGORIES
     context["audit_counts"] = {
-        key: sum(1 for a in audit if key == "all" or AUDIT_META[a.action.value]["category"] == key)
+        key: sum(
+            1
+            for a in every_category
+            if key == "all" or audit_meta(a.action.value)["category"] == key
+        )
         for key, _ in AUDIT_CATEGORIES
     }
+    context["severity_meta"] = SEVERITY_META
+    context["result_meta"] = RESULT_META
     context["pr_base_url"] = pull_base_url(
         runtime.settings.target_repo, runtime.settings.allow_mock_baseline
     )
     context["reversible_actions"] = sorted(a.value for a in REVERSIBLE_ACTIONS)
-    context["events"] = runtime.store.list_drift_events(limit=200)
     return templates.TemplateResponse(request, "events.html", context)
+
+
+def filtered_events(
+    runtime: WardenRuntime, event_filter: EventFilter, limit: int
+) -> tuple[list[AuditLogEntry], list[dict[str, object]]]:
+    """Audit rows and drift transitions that pass the filter, newest first.
+
+    When the search is an incident id the rows come oldest first, so the incident
+    reads as a timeline.
+    """
+    since, until = event_filter.since, event_filter.until
+    audit = [
+        a
+        for a in runtime.store.list_audit(limit, since=since, until=until)
+        if event_filter.match_audit(a)
+    ]
+    events = [
+        e
+        for e in runtime.store.list_drift_events(limit, since=since, until=until)
+        if event_filter.match_event(e)
+    ]
+    if event_filter.correlation:
+        audit.reverse()
+        events.reverse()
+    return audit, events
 
 
 @router.get("/buffer", response_class=HTMLResponse)

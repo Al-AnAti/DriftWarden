@@ -144,6 +144,7 @@ All settings come from environment variables or `.env` (see `.env.example`).
 | `POST /api/actions/batch` | Enforce All / Adopt All over a scope (`all`, `rogue`, `drifted`, `missing`); Adopt All opens one consolidated pull request on a `warden/batch-adopt-*` branch. |
 | `GET/PUT /api/settings` | Read and change runtime settings. |
 | `POST /api/buffer/{id}/revoke` | Close the adoption pull request and evict every buffer entry that shares it. |
+| `GET /api/export/{audit\|transitions}?format=csv\|json` | Download the Events Log tables with the page's filters applied (search, severity, UTC dates, category). |
 | `POST /api/audit/{id}/reverse` | Undo an Enforce or Adopt recorded in the audit log (the Events Log **Reverse** button); the reversal is its own audit entry linked to the original. |
 | `GET /api/audit`, `/api/events`, `/api/buffer`, `/api/health`, `POST /api/reconcile` | Data and a manual refresh. |
 

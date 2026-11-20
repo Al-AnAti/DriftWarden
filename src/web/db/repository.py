@@ -46,6 +46,13 @@ def _aware(value: datetime | None) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def _naive(value: datetime) -> datetime:
+    """UTC instant without tzinfo, as SQLite stores and compares it."""
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def _dump(value: dict[str, Any] | None) -> str | None:
     """Encode structured metadata for a JSON text column."""
     return json.dumps(value, default=str) if value is not None else None
@@ -326,12 +333,27 @@ class Store:
             details_json=_load_snapshot(row.details_json),
         )
 
-    def list_audit(self, limit: int = 200) -> list[AuditLogEntry]:
-        """Most recent audit rows, newest first, with their reversal state."""
+    def list_audit(
+        self,
+        limit: int = 200,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[AuditLogEntry]:
+        """Most recent audit rows, newest first, with their reversal state.
+
+        Args:
+            limit: Maximum number of rows.
+            since: Only rows at or after this UTC instant.
+            until: Only rows at or before this UTC instant.
+        """
+        query = select(AuditLogRow)
+        if since is not None:
+            query = query.where(AuditLogRow.timestamp >= _naive(since))
+        if until is not None:
+            query = query.where(AuditLogRow.timestamp <= _naive(until))
         with self._db.session() as session:
-            rows = session.scalars(
-                select(AuditLogRow).order_by(AuditLogRow.id.desc()).limit(limit)
-            ).all()
+            rows = session.scalars(query.order_by(AuditLogRow.id.desc()).limit(limit)).all()
             index = self._reversal_index(session)
         return [self._entry(row, index.get(row.id, [])) for row in rows]
 
@@ -584,12 +606,27 @@ class Store:
         except Exception as exc:
             raise DatabaseWriteError(f"Cannot write drift event: {exc}") from exc
 
-    def list_drift_events(self, limit: int = 200) -> list[dict[str, object]]:
-        """Most recent transitions, newest first, as plain rows for templates."""
+    def list_drift_events(
+        self,
+        limit: int = 200,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        """Most recent transitions, newest first, as plain rows for templates.
+
+        Args:
+            limit: Maximum number of rows.
+            since: Only rows at or after this UTC instant.
+            until: Only rows at or before this UTC instant.
+        """
+        query = select(DriftEventRow)
+        if since is not None:
+            query = query.where(DriftEventRow.detected_at >= _naive(since))
+        if until is not None:
+            query = query.where(DriftEventRow.detected_at <= _naive(until))
         with self._db.session() as session:
-            rows = session.scalars(
-                select(DriftEventRow).order_by(DriftEventRow.id.desc()).limit(limit)
-            ).all()
+            rows = session.scalars(query.order_by(DriftEventRow.id.desc()).limit(limit)).all()
         return [
             {
                 "id": row.id,

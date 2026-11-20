@@ -32,7 +32,7 @@
     </div>
 
     <div id="counters" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        {% for key, meta in status_meta.items() %}
+        {% for key, meta in status_meta.items() if key != "removed" %}
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
             <p class="text-xs uppercase tracking-wider text-slate-400">{{ meta.label }}</p>
             <p data-count="{{ key }}" class="text-3xl font-bold mt-1 text-{{ meta.tone }}-400">{{ counts[key] }}</p>

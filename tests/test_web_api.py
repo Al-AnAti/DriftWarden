@@ -350,3 +350,8 @@ def test_events_page_transition_columns(client: TestClient) -> None:
     assert "SHADOW IT" not in page.split("Audit log")[0]  # no prose in the timeline
     events = client.get("/api/events").json()
     assert all(e["trigger"] and e["reason"] for e in events)
+
+
+def test_dashboard_has_no_removed_counter(client: TestClient) -> None:
+    home = client.get("/").text
+    assert 'data-count="removed"' not in home and 'data-count="rogue"' in home

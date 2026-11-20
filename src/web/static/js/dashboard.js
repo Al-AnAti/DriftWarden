@@ -803,6 +803,127 @@
         toggleEventRow(row);
     });
 
+    /* Events Log: filter in place. The filter bar, the audit category pills and the
+       incident links fetch /events with the new parameters and swap in only the
+       affected sections, so the page keeps its scroll position. The URL is kept
+       clean (no empty or default parameters) with history.replaceState, and any
+       failure falls back to a normal page load of the same URL. */
+    const FILTER_KEYS = ["category", "severity", "since", "until", "q"];
+    let filterController = null;
+    let searchTimer = null;
+
+    function cleanEventsUrl(params) {
+        const clean = new URLSearchParams();
+        FILTER_KEYS.forEach(function (key) {
+            const value = (params.get(key) || "").trim();
+            if (value && !(key === "category" && value === "all")) clean.set(key, value);
+        });
+        const query = clean.toString();
+        return "/events" + (query ? "?" + query : "");
+    }
+
+    function formParams(form) {
+        const params = new URLSearchParams();
+        new FormData(form).forEach(function (value, key) { params.set(key, String(value)); });
+        return params;
+    }
+
+    function syncFilterForm(form, params, force) {
+        FILTER_KEYS.forEach(function (key) {
+            const field = form.elements.namedItem(key);
+            // Leave the field being typed in alone, unless a link replaced the filters.
+            if (field && "value" in field && (force || field !== document.activeElement)) {
+                field.value = params.get(key) || "";
+            }
+        });
+        const clear = form.querySelector("[data-filter-clear]");
+        if (clear) clear.hidden = !FILTER_KEYS.some(function (key) { return params.get(key); });
+    }
+
+    async function applyEventsFilter(url, sections) {
+        const form = document.getElementById("events-filter");
+        if (filterController) filterController.abort();
+        const controller = new AbortController();
+        filterController = controller;
+        const targets = sections.map(function (id) { return document.getElementById(id); })
+            .filter(Boolean);
+        targets.forEach(function (el) { el.setAttribute("aria-busy", "true"); });
+        try {
+            const response = await fetch(url, {
+                signal: controller.signal,
+                headers: { "Accept": "text/html" },
+            });
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+            if (controller !== filterController) return; // a newer request won
+            sections.forEach(function (id) {
+                const current = document.getElementById(id);
+                const fresh = doc.getElementById(id);
+                if (current && fresh) current.replaceWith(document.importNode(fresh, true));
+            });
+            const finalUrl = new URL(response.url, window.location.origin);
+            const clean = cleanEventsUrl(finalUrl.searchParams);
+            history.replaceState(null, "", clean);
+            if (form) syncFilterForm(form, new URL(clean, window.location.origin).searchParams);
+        } catch (err) {
+            if (err && err.name === "AbortError") return;
+            window.location.assign(url); // fall back to a normal page load
+        } finally {
+            targets.forEach(function (el) { el.removeAttribute("aria-busy"); });
+            if (controller === filterController) filterController = null;
+        }
+    }
+
+    const ALL_SECTIONS = ["incident-banner-slot", "transitions-section", "audit-section"];
+
+    function filterFromForm(form) {
+        const url = cleanEventsUrl(formParams(form));
+        applyEventsFilter(url, ALL_SECTIONS);
+    }
+
+    document.addEventListener("submit", function (event) {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || form.id !== "events-filter") return;
+        event.preventDefault();
+        clearTimeout(searchTimer);
+        filterFromForm(form);
+    });
+
+    document.addEventListener("change", function (event) {
+        const form = event.target.form;
+        if (!form || form.id !== "events-filter" || event.target.name === "q") return;
+        filterFromForm(form);
+    });
+
+    document.addEventListener("input", function (event) {
+        const form = event.target.form;
+        if (!form || form.id !== "events-filter" || event.target.name !== "q") return;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () { filterFromForm(form); }, 350);
+    });
+
+    document.addEventListener("click", function (event) {
+        const form = document.getElementById("events-filter");
+        if (!form || event.defaultPrevented || event.button !== 0) return;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const link = event.target.closest("a[href]");
+        if (!link) return;
+        const target = new URL(link.href, window.location.origin);
+        if (target.origin !== window.location.origin || target.pathname !== "/events" || target.hash) return;
+        event.preventDefault();
+        clearTimeout(searchTimer);
+        const url = cleanEventsUrl(target.searchParams);
+        if (link.hasAttribute("data-audit-filter")) {
+            // A category pill only changes the audit log; keep the other filters as they are.
+            const category = form.elements.namedItem("category");
+            if (category) category.value = target.searchParams.get("category") || "";
+            applyEventsFilter(cleanEventsUrl(formParams(form)), ["audit-section"]);
+            return;
+        }
+        syncFilterForm(form, target.searchParams, true);
+        applyEventsFilter(url, ALL_SECTIONS);
+    });
+
     window.wardenReverse = async function (id, action, target, warning) {
         const what = action === "adopt_pr_opened"
             ? "close the adoption pull request, delete its branch and return the workload(s) to their live drift state"

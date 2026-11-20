@@ -25,8 +25,8 @@
         <button onclick="wardenRefreshPage()" class="btn-lg btn-ghost text-sm">🔄 Refresh</button>
     </div>
 
-    <form method="get" action="/events" class="filter-bar" role="search" aria-label="Filter events">
-        {% if filter.category != 'all' %}<input type="hidden" name="category" value="{{ filter.category }}">{% endif %}
+    <form method="get" action="/events" class="filter-bar" role="search" aria-label="Filter events" id="events-filter">
+        <input type="hidden" name="category" value="{{ filter.category if filter.category != 'all' else '' }}">
         <label class="filter-field grow min-w-[14rem]">
             <span>Search</span>
             <input type="search" name="q" value="{{ filter.query }}" placeholder="Container, service, INC-001 or #id" autocomplete="off">
@@ -50,18 +50,20 @@
         </label>
         <div class="flex items-end gap-2">
             <button type="submit" class="btn btn-violet">Apply</button>
-            {% if filter.active or filter.category != 'all' %}<a class="btn btn-ghost" href="/events">Clear</a>{% endif %}
+            <a class="btn btn-ghost" href="/events" data-filter-clear {% if not (filter.active or filter.category != 'all') %}hidden{% endif %}>Clear</a>
         </div>
     </form>
 
+    <div id="incident-banner-slot">
     {% if filter.correlation %}
     <div class="banner border-indigo-500/50 bg-indigo-950/40 text-indigo-100 flex flex-wrap justify-between gap-2" id="incident-banner">
         <span>Incident <strong class="font-mono">{{ filter.correlation }}</strong>: {{ events_total }} transition{{ '' if events_total == 1 else 's' }} and {{ audit_total }} audit row{{ '' if audit_total == 1 else 's' }}, oldest first.</span>
         <a class="text-indigo-300 hover:underline" href="/events">Show every event</a>
     </div>
     {% endif %}
+    </div>
 
-    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden" id="transitions-section" data-swap>
         <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap gap-3 justify-between items-center">
             <div class="flex items-baseline gap-3">
                 <h2 class="font-semibold">Drift transitions</h2>
@@ -124,7 +126,7 @@
         </div>
     </section>
 
-    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden" id="audit-section" data-swap>
         <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap gap-3 justify-between items-center">
             <div class="flex items-baseline gap-3">
                 <h2 class="font-semibold">Audit log</h2>

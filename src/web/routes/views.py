@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
@@ -206,11 +206,19 @@ def diff_page(request: Request, ref: str) -> HTMLResponse:
 
 
 @router.get("/events", response_class=HTMLResponse)
-def events_page(request: Request) -> HTMLResponse:
-    """Audit log and drift transitions."""
+def events_page(request: Request) -> Response:
+    """Audit log and drift transitions.
+
+    The page filters in place (``dashboard.js`` fetches this route and swaps the
+    tables in), but a plain form submit lands here too: empty, default or invalid
+    parameters (``q=``, ``since=``, ``category=all``) are redirected away so the
+    URL stays clean and shareable.
+    """
     runtime = get_runtime(request)
-    context = base_context(request, runtime, "events")
     event_filter = EventFilter.from_params(request.query_params)
+    if dict(request.query_params) != event_filter.params():
+        return RedirectResponse(f"/events{event_filter.query_string()}", status_code=303)
+    context = base_context(request, runtime, "events")
     audit, events = filtered_events(runtime, event_filter, SCAN_LIMIT)
     every_category = [
         a

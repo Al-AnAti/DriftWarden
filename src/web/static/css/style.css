@@ -251,3 +251,5 @@ tr.detail-row { background: rgba(2, 6, 23, 0.55); }
 .detail-table td { padding: 0.25rem 0.6rem; border-bottom: 1px solid #1e293b; vertical-align: top; overflow-wrap: anywhere; }
 .detail-table tr.changed td { background: rgba(120, 53, 15, 0.25); }
 
+
+[data-swap][aria-busy="true"], #incident-banner-slot[aria-busy="true"] { opacity: 0.55; transition: opacity 0.15s ease; }

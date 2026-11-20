@@ -263,3 +263,29 @@ def test_store_date_range(client: TestClient) -> None:
     assert store.list_audit(since=now + timedelta(minutes=5)) == []
     assert store.list_audit(until=now - timedelta(days=1)) == []
     assert store.list_drift_events(since=now + timedelta(minutes=5)) == []
+
+
+def test_events_url_is_cleaned_of_empty_and_default_params(client: TestClient) -> None:
+    response = client.get("/events?q=&severity=&since=&until=&category=all", follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/events"
+    response = client.get(
+        "/events?category=reversals&q=web&since=&severity=bogus", follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/events?category=reversals&q=web"
+    clean = client.get("/events?category=reversals&q=web", follow_redirects=False)
+    assert clean.status_code == 200  # already clean: no redirect loop
+
+
+def test_events_page_has_swappable_sections(client: TestClient) -> None:
+    page = client.get("/events").text
+    for marker in (
+        'id="events-filter"',
+        'id="incident-banner-slot"',
+        'id="transitions-section" data-swap',
+        'id="audit-section" data-swap',
+        "data-filter-clear hidden",
+    ):
+        assert marker in page
+    filtered = client.get("/events?severity=high").text
+    assert "data-filter-clear hidden" not in filtered

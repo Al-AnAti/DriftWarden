@@ -12,8 +12,8 @@ writes the live state back into Git. Full docs: `README.md` and `docs/` (overvie
 - loguru for logging. pytest + pytest-asyncio (`asyncio_mode = "auto"`), ruff, mypy, poethepoet.
 
 ## Commands
-All tasks live in `[tool.poe.tasks]` in `pyproject.toml` and run as `warden <task>` (there is no
-Makefile). Install first with `pip install -e ".[dev]"`. Run `warden` alone to list tasks.
+All tasks live in `[tool.poe.tasks]` in `pyproject.toml` and run as `warden <task>`.
+Install first with `pip install -e ".[dev]"`. Run `warden` alone to list tasks.
 - `warden check`: CI gate (ruff format --check, ruff check, mypy, pytest). Must stay green.
 - `warden test [-k expr]`, `warden lint`, `warden typecheck`, `warden format`, `warden coverage`.
 - `warden dev [-p PORT]`: uvicorn with reload on the host (uses `DATABASE_URL` from `.env`).

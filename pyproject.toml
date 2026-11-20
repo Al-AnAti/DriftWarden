@@ -81,7 +81,7 @@ addopts = "-v --strict-markers"
 asyncio_mode = "auto"
 
 # ==========================================================================
-# Project tasks: `warden <task>` (or `poe <task>`), replacing the old Makefile.
+# Project tasks: `warden <task>` (or `poe <task>`).
 # Run `warden` with no arguments to list them. Tool commands resolve from
 # ./venv automatically when it exists, so the venv does not need activating.
 # Shell scripts run through Git Bash on Windows (never WSL's bash).
@@ -132,10 +132,6 @@ default_item_type = "cmd"
 help = "Run DriftWarden on the host with live reload (database: DATABASE_URL in .env)"
 cmd = "uvicorn web.app:app --app-dir src --reload --port ${port}"
 args = [{ name = "port", options = ["--port", "-p"], default = "8000", help = "Host port" }]
-
-[tool.poe.tasks.run]
-help = "Alias for dev"
-ref = "dev"
 
 [tool.poe.tasks.start]
 help = "Build the image and run DriftWarden as a container (socket and ./data mounted)"
